@@ -231,10 +231,13 @@
 }
 .body {
     min-height: 0;
+    min-width: 0;
     flex: 1;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     padding: 20px 22px 40px;
 }
+.output { min-width: 0; max-width: 100%; overflow: hidden; }
 .card,
 .placeholder {
     padding: 15px;

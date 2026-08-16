@@ -72,7 +72,7 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
   setStatusFilter: (statusFilter) => set({ statusFilter }),
   setConnection: (connectionStatus, connectionError) => set({ connectionStatus, connectionError }),
   setProviderConnection: (provider, status) => set((state) => ({ providerConnections: { ...state.providerConnections, [provider]: status } })),
-  setThreadRuntimeStatus: (threadId, status) => set((state) => state.threads[threadId] ? ({ threads: { ...state.threads, [threadId]: { ...state.threads[threadId], status } } }) : state),
+  setThreadRuntimeStatus: (threadId, status) => set((state) => !state.threads[threadId] || state.threads[threadId].status === status ? state : ({ threads: { ...state.threads, [threadId]: { ...state.threads[threadId], status } } })),
   syncFromSource: async () => {
     if (syncInFlight) return syncInFlight;
     syncInFlight = (async () => {

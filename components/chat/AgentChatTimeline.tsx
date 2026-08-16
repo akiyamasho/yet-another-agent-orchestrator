@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bot, ChevronDown, ChevronRight, CircleAlert, FileCode2, Image as ImageIcon, LoaderCircle, Search, Sparkles, Terminal, UserRound, UsersRound } from "lucide-react";
 import type { AgentProvider } from "@/lib/types";
 import styles from "./AgentChatTimeline.module.css";
@@ -36,6 +36,7 @@ export type ChatTimeline = {
 };
 
 const time = (value?: string) => value ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(value)) : "";
+const PAGE_SIZE = 60;
 
 export function AgentChatTimeline({ timeline, provider, loading, error, previews, onPreview, onReveal }: {
   timeline?: ChatTimeline;
@@ -46,10 +47,12 @@ export function AgentChatTimeline({ timeline, provider, loading, error, previews
   onPreview?: (path: string) => void;
   onReveal?: (path: string) => void;
 }) {
-  const endRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const items = useMemo(() => timeline?.items ?? [], [timeline]);
-  useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [items.length, timeline?.status]);
+  const hiddenCount = Math.max(0, items.length - visibleCount);
+  const visibleItems = useMemo(() => items.slice(-visibleCount), [items, visibleCount]);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); setExpanded({}); }, [timeline?.threadId]);
 
   if (loading && !timeline) return <div className={styles.state}><LoaderCircle className={styles.spin} size={18}/> Syncing chat…</div>;
   if (error) return <div className={`${styles.state} ${styles.error}`}><CircleAlert size={18}/>{error}</div>;
@@ -57,7 +60,8 @@ export function AgentChatTimeline({ timeline, provider, loading, error, previews
 
   return <div className={styles.timeline}>
     {timeline?.externalRuntime && <div className={styles.syncNotice}><span>{timeline.inferredRuntime ? "Active in another Codex window" : "Synced from Codex history"}</span><p>Chat content refreshes here. The other window keeps its exact stop/running signal and unpersisted tool events until you continue the task from Constellation.</p></div>}
-    {items.map((item) => {
+    {hiddenCount > 0 && <button className={styles.earlier} onClick={() => setVisibleCount((count) => count + PAGE_SIZE)}>Show {Math.min(PAGE_SIZE, hiddenCount)} earlier items <span>{hiddenCount} hidden</span></button>}
+    {visibleItems.map((item) => {
       if (item.kind === "message") return <Message key={item.id} item={item} provider={provider}/>;
       if (item.kind === "file") return <FileItem key={item.id} item={item} onReveal={onReveal}/>;
       if (item.kind === "image") return <ImageItem key={item.id} item={item} preview={item.path ? previews?.[item.path] : undefined} onPreview={onPreview} onReveal={onReveal}/>;
@@ -72,7 +76,6 @@ export function AgentChatTimeline({ timeline, provider, loading, error, previews
       </article>;
     })}
     {timeline?.status === "running" && <div className={styles.live}><span/><strong>{provider === "claude" ? "Claude Code" : "Codex"} is working</strong><i/><i/><i/></div>}
-    <div ref={endRef}/>
   </div>;
 }
 

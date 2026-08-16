@@ -30,7 +30,7 @@ export function ThreadComposer({ thread, cwd, onSent }: { thread: AgentThread; c
         return [...byPath.values()].slice(0, 10);
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(composerError(cause, thread.provider ?? "codex"));
     }
   };
 
@@ -44,7 +44,7 @@ export function ThreadComposer({ thread, cwd, onSent }: { thread: AgentThread; c
       setMessage(""); setAttachments([]); setNotice(`Sent to ${providerLabel}. Live transcript updates will appear here.`);
       await onSent?.();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(composerError(cause, thread.provider ?? "codex"));
     } finally {
       setBusy(false);
     }
@@ -67,6 +67,16 @@ function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function composerError(cause: unknown, provider: "codex" | "claude") {
+  const raw = cause instanceof Error ? cause.message : String(cause);
+  if (provider === "codex" && /already has an active writer/i.test(raw)) {
+    return "This Codex task is open in another Codex window, which currently owns the live session. Continue it there, or close that task there and retry here.";
+  }
+  return raw
+    .replace(/^Error invoking remote method '[^']+':\s*/i, "")
+    .replace(/^(CodexAppServerError|ClaudeCodeError):\s*/i, "");
 }
 
 export default ThreadComposer;

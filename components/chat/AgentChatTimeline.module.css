@@ -1,36 +1,38 @@
-.timeline { display: grid; gap: 10px; padding-bottom: 8px; }
+.timeline { min-width: 0; max-width: 100%; display: grid; gap: 10px; padding-bottom: 8px; overflow: hidden; }
 .state, .empty { min-height: 180px; display: grid; place-content: center; justify-items: center; gap: 8px; color: #93a0b4; text-align: center; }
 .state { grid-auto-flow: column; }
 .state.error { color: #fda4af; }
 .empty strong { color: #dce6f4; }
 .empty p { max-width: 330px; margin: 0; }
-.syncNotice { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 7%, #0b0e15); }
+.syncNotice { min-width: 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 7%, #0b0e15); }
 .syncNotice span { color: var(--accent); font: 700 10px/1.2 ui-monospace, monospace; letter-spacing: .09em; text-transform: uppercase; }
-.syncNotice p { margin: 5px 0 0; color: #8f9bad; font-size: 12px; }
-.message { padding: 13px 14px; border: 1px solid rgba(148,163,184,.14); border-radius: 9px; background: rgba(20,26,38,.72); }
+.syncNotice p { margin: 5px 0 0; color: #8f9bad; font-size: 12px; overflow-wrap: anywhere; }
+.earlier { width: 100%; min-width: 0; padding: 9px 11px; color: #a8b4c6; border: 1px solid rgba(148,163,184,.15); border-radius: 8px; background: rgba(8,12,18,.72); cursor: pointer; font: 11px ui-monospace, monospace; }
+.earlier span { margin-left: 5px; color: #687386; }
+.message { min-width: 0; max-width: 100%; padding: 13px 14px; border: 1px solid rgba(148,163,184,.14); border-radius: 9px; background: rgba(20,26,38,.72); content-visibility: auto; contain-intrinsic-size: auto 90px; }
 .message.user { margin-left: 38px; border-color: color-mix(in srgb, var(--accent) 30%, transparent); background: color-mix(in srgb, var(--accent) 7%, #121722); }
 .message header, .files header, .image header { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; color: var(--accent); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
 .message header time { margin-left: auto; color: #687386; font: 500 10px ui-monospace, monospace; }
 .message > div { color: #d1dae7; font-size: 14px; line-height: 1.58; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message.user > div { color: #edf2f8; }
-.event { overflow: hidden; border: 1px solid rgba(148,163,184,.12); border-radius: 8px; background: rgba(8,12,18,.72); }
+.event { min-width: 0; max-width: 100%; overflow: hidden; border: 1px solid rgba(148,163,184,.12); border-radius: 8px; background: rgba(8,12,18,.72); content-visibility: auto; contain-intrinsic-size: auto 48px; }
 .event.running { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 .event.failed { border-color: rgba(248,113,113,.35); }
 .eventHeader { width: 100%; display: grid; grid-template-columns: 18px minmax(0,1fr) auto auto; align-items: center; gap: 7px; padding: 9px 11px; border: 0; color: #9ba8ba; background: transparent; text-align: left; cursor: pointer; }
-.eventHeader > span { min-width: 0; display: flex; gap: 7px; align-items: baseline; }
+.eventHeader > span { min-width: 0; display: flex; gap: 7px; align-items: baseline; overflow: hidden; }
 .eventHeader strong { color: #bdc8d7; font-size: 12px; }
 .eventHeader small { overflow: hidden; color: #727e90; font: 500 10px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
-.event pre, .files pre { max-height: 360px; margin: 0; padding: 10px 12px; overflow: auto; border-top: 1px solid rgba(148,163,184,.1); color: #aeb9c8; background: #070a0f; font: 11px/1.55 ui-monospace, monospace; white-space: pre-wrap; }
+.event pre, .files pre { max-width: 100%; max-height: 360px; margin: 0; padding: 10px 12px; overflow-x: hidden; overflow-y: auto; border-top: 1px solid rgba(148,163,184,.1); color: #aeb9c8; background: #070a0f; font: 11px/1.55 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .event pre.detail { color: #7f8a9b; }
-.files, .image { padding: 11px 12px; border: 1px solid rgba(148,163,184,.14); border-radius: 8px; background: rgba(10,14,21,.78); }
+.files, .image { min-width: 0; max-width: 100%; padding: 11px 12px; border: 1px solid rgba(148,163,184,.14); border-radius: 8px; background: rgba(10,14,21,.78); content-visibility: auto; contain-intrinsic-size: auto 70px; }
 .files header, .image header { margin-bottom: 5px; color: #9eabba; }
 .files > div { border-top: 1px solid rgba(148,163,184,.09); }
-.files > div > button, .pathButton { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 2px; overflow: hidden; border: 0; color: #b8c5d6; background: none; font: 11px ui-monospace, monospace; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.files > div > button, .pathButton { width: 100%; min-width: 0; display: flex; align-items: flex-start; gap: 8px; padding: 8px 2px; overflow: hidden; border: 0; color: #b8c5d6; background: none; font: 11px/1.45 ui-monospace, monospace; text-align: left; white-space: normal; overflow-wrap: anywhere; word-break: break-word; cursor: pointer; }
 .files button span { flex: 0 0 auto; color: var(--accent); font-size: 9px; text-transform: uppercase; }
 .files summary { padding: 5px 2px 8px; color: #788597; cursor: pointer; font-size: 11px; }
 .imagePreview { width: 100%; overflow: hidden; padding: 0; border: 1px solid rgba(148,163,184,.16); border-radius: 6px; background: #05070b; cursor: zoom-in; }
 .imagePreview img { display: block; width: 100%; max-height: 240px; object-fit: contain; }
-.image p { color: #9ba8b9; font-size: 12px; white-space: pre-wrap; }
+.image p { color: #9ba8b9; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .live { display: flex; align-items: center; gap: 6px; padding: 9px 11px; color: var(--accent); font-size: 12px; }
 .live > span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
 .live i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; animation: blink 1.2s ease-in-out infinite; }

@@ -1,4 +1,4 @@
-.composer { flex: 0 0 auto; padding: 14px 20px 16px; border-top: 1px solid var(--line); background: rgba(7, 10, 13, .985); box-shadow: 0 -18px 40px rgba(0, 0, 0, .24); }
+.composer { min-width: 0; max-width: 100%; flex: 0 0 auto; overflow: hidden; padding: 14px 20px 16px; border-top: 1px solid var(--line); background: rgba(7, 10, 13, .985); box-shadow: 0 -18px 40px rgba(0, 0, 0, .24); }
 .attachments { display: flex; gap: 7px; overflow-x: auto; padding: 0 0 9px; }
 .attachment { min-width: 0; max-width: 210px; display: flex; align-items: center; gap: 8px; padding: 7px 8px; color: var(--projector); border: 1px solid var(--line); background: var(--surface); }
 .attachment > span { min-width: 0; flex: 1; }
@@ -6,8 +6,8 @@
 .attachment strong { color: var(--text); font-size: 12px; font-weight: 500; }
 .attachment small { margin-top: 2px; color: var(--quiet); font: 9px "IBM Plex Mono", monospace; }
 .attachment button { padding: 2px; color: var(--quiet); border: 0; background: transparent; cursor: pointer; }
-.inputRow { display: grid; grid-template-columns: 38px minmax(0, 1fr) 42px; align-items: stretch; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line)); background: #080c0f; }
-.inputRow textarea { width: 100%; min-height: 58px; max-height: 160px; resize: vertical; padding: 11px 8px; color: var(--text); border: 0; outline: 0; background: transparent; font: 13px/1.5 "IBM Plex Sans", sans-serif; }
+.inputRow { min-width: 0; display: grid; grid-template-columns: 38px minmax(0, 1fr) 42px; align-items: stretch; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line)); background: #080c0f; }
+.inputRow textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 58px; max-height: 160px; resize: vertical; padding: 11px 8px; color: var(--text); border: 0; outline: 0; background: transparent; font: 13px/1.5 "IBM Plex Sans", sans-serif; overflow-wrap: anywhere; word-break: break-word; }
 .inputRow textarea::placeholder { color: #6f7b81; }
 .attachButton, .sendButton { display: grid; place-items: center; margin: 0; padding: 0; border: 0; background: transparent; cursor: pointer; }
 .attachButton { color: var(--muted); border-right: 1px solid var(--line); }
@@ -17,7 +17,7 @@
 .attachButton:disabled, .sendButton:disabled { cursor: not-allowed; opacity: .34; }
 .footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 7px; color: var(--quiet); font: 9px/1.35 "IBM Plex Mono", monospace; letter-spacing: .03em; }
 .footer kbd { color: var(--muted); font: inherit; }
-.error, .notice { margin: 8px 0 0; font: 10px/1.45 "IBM Plex Mono", monospace; }
+.error, .notice { max-width: 100%; margin: 8px 0 0; font: 10px/1.45 "IBM Plex Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .error { color: #e58d83; }
 .notice { color: #8fae92; }
 .spin { animation: spin 1s linear infinite; }

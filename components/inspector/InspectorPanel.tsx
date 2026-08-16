@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, CircleAlert, Clock3, Pause, Play, Square, X } from "lucide-react";
 import { AgentChatTimeline, type ChatTimeline } from "@/components/chat/AgentChatTimeline";
 import { ThreadComposer } from "@/components/inspector/ThreadComposer";
@@ -23,6 +23,8 @@ export function InspectorPanel({ threadId, onClose, onAddSubagent, onEdit, onArc
   const [detailError, setDetailError] = useState<string>();
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [focusedPreview, setFocusedPreview] = useState<{ path: string; dataUrl: string; name: string }>();
+  const activeRequest = useRef<symbol | undefined>(undefined);
+  const detailRevision = useRef("");
   const selectedThreadId = useConstellationStore((s) => threadId ?? s.selectedThreadId);
   const thread = useConstellationStore((s) => selectedThreadId ? s.threads[selectedThreadId] : undefined);
   const folder = useConstellationStore((s) => thread ? s.folders[thread.folderId] : undefined);
@@ -33,13 +35,14 @@ export function InspectorPanel({ threadId, onClose, onAddSubagent, onEdit, onArc
   const selectThread = useConstellationStore((s) => s.selectThread);
   const syncFromSource = useConstellationStore((s) => s.syncFromSource);
   const setThreadRuntimeStatus = useConstellationStore((s) => s.setThreadRuntimeStatus);
+  const threadProvider = thread?.provider ?? "codex";
   const children = useMemo(() => thread ? Object.values(threads).filter((item) => item.parentId === thread.id && !item.archived) : [], [thread, threads]);
   const activity = useMemo(() => thread ? Object.values(events).filter((event) => event.threadId === thread.id).sort((a, b) => b.timestamp.localeCompare(a.timestamp)) : [], [thread, events]);
   const timeline = useMemo(() => {
     const source = detail && typeof detail === "object" && "items" in detail && Array.isArray((detail as ChatTimeline).items) ? detail as ChatTimeline : connectionStatus === "demo" && thread ? demoTimeline(thread.provider ?? "codex", thread.id, thread.status) : undefined;
     if (!source) return undefined;
     return { ...source, items: source.items.map((item) => ({ ...item, path: item.path ? projectPath(folder?.path, item.path) : undefined, changes: item.changes?.map((change) => ({ ...change, path: projectPath(folder?.path, change.path) })) })) };
-  }, [connectionStatus, detail, folder?.path, thread]);
+  }, [connectionStatus, detail, folder?.path, thread?.id, thread?.provider, thread?.status]);
 
   const loadPreview = useCallback(async (filePath: string, focus: boolean) => {
     const resolved = projectPath(folder?.path, filePath);
@@ -50,48 +53,67 @@ export function InspectorPanel({ threadId, onClose, onAddSubagent, onEdit, onArc
   }, [folder?.path]);
   const reveal = useCallback(async (filePath: string) => { await window.constellationDesktop?.files.reveal(projectPath(folder?.path, filePath)); }, [folder?.path]);
 
+  const applyDetail = useCallback((response: unknown) => {
+    const revision = timelineRevision(response);
+    if (revision !== detailRevision.current) {
+      detailRevision.current = revision;
+      setDetail(response);
+    }
+    const runtime = response && typeof response === "object" && "status" in response ? String((response as { status?: string }).status) : "";
+    const external = Boolean(response && typeof response === "object" && "externalRuntime" in response && (response as { externalRuntime?: boolean }).externalRuntime);
+    if (selectedThreadId && ["running", "needs_attention", "failed", "completed", "idle"].includes(runtime) && !(external && runtime === "idle")) setThreadRuntimeStatus(selectedThreadId, runtime as ThreadStatus);
+  }, [selectedThreadId, setThreadRuntimeStatus]);
+
   const refreshDetail = useCallback(async (showLoading = false) => {
-    if (!selectedThreadId || !thread || !window.constellationDesktop) return;
+    if (!selectedThreadId || !window.constellationDesktop || activeRequest.current) return;
+    const request = Symbol(selectedThreadId);
+    activeRequest.current = request;
     if (showLoading) setDetailLoading(true);
     setDetailError(undefined);
     const { rawId } = splitProviderThreadId(selectedThreadId);
     try {
-      const response = thread.provider === "claude" ? await window.constellationDesktop.claude.readSession(rawId) : await window.constellationDesktop.codex.readThread(rawId);
-      setDetail(response);
-      const runtime = response && typeof response === "object" && "status" in response ? String((response as { status?: string }).status) : "";
-      const external = Boolean(response && typeof response === "object" && "externalRuntime" in response && (response as { externalRuntime?: boolean }).externalRuntime);
-      if (["running", "needs_attention", "failed", "completed", "idle"].includes(runtime) && !(external && runtime === "idle")) setThreadRuntimeStatus(selectedThreadId, runtime as ThreadStatus);
+      const response = threadProvider === "claude" ? await window.constellationDesktop.claude.readSession(rawId) : await window.constellationDesktop.codex.readThread(rawId);
+      if (activeRequest.current === request) applyDetail(response);
     } catch (error) {
-      setDetailError(error instanceof Error ? error.message : String(error));
+      if (activeRequest.current === request) setDetailError(error instanceof Error ? error.message : String(error));
     } finally {
-      if (showLoading) setDetailLoading(false);
+      if (activeRequest.current === request) {
+        activeRequest.current = undefined;
+        if (showLoading) setDetailLoading(false);
+      }
     }
-  }, [selectedThreadId, setThreadRuntimeStatus, thread]);
+  }, [applyDetail, selectedThreadId, threadProvider]);
 
   useEffect(() => {
-    if (tab !== "chat" || !selectedThreadId || !thread || !window.constellationDesktop) return;
-    let cancelled = false;
-    setDetailLoading(true); setDetailError(undefined); setDetail(undefined); setFocusedPreview(undefined);
-    const { rawId } = splitProviderThreadId(selectedThreadId);
-    const request = thread.provider === "claude" ? window.constellationDesktop.claude.readSession(rawId) : window.constellationDesktop.codex.readThread(rawId);
-    request.then((response) => { if (!cancelled) { setDetail(response); const runtime = response && typeof response === "object" && "status" in response ? String((response as { status?: string }).status) : ""; const external = Boolean(response && typeof response === "object" && "externalRuntime" in response && (response as { externalRuntime?: boolean }).externalRuntime); if (["running", "needs_attention", "failed", "completed", "idle"].includes(runtime) && !(external && runtime === "idle")) setThreadRuntimeStatus(selectedThreadId, runtime as ThreadStatus); } }).catch((error) => { if (!cancelled) setDetailError(error instanceof Error ? error.message : String(error)); }).finally(() => { if (!cancelled) setDetailLoading(false); });
-    return () => { cancelled = true; };
-  }, [selectedThreadId, setThreadRuntimeStatus, tab, thread?.provider]);
+    if (tab !== "chat" || !selectedThreadId || !window.constellationDesktop) return;
+    activeRequest.current = undefined;
+    detailRevision.current = "";
+    setDetail(undefined); setDetailError(undefined); setFocusedPreview(undefined);
+    void refreshDetail(true);
+  }, [refreshDetail, selectedThreadId, tab]);
 
   useEffect(() => {
     const desktop = window.constellationDesktop;
-    if (!desktop || !selectedThreadId || !thread) return;
+    if (tab !== "chat" || !desktop || !selectedThreadId) return;
     let timer: number | undefined;
-    const schedule = () => { window.clearTimeout(timer); timer = window.setTimeout(() => void refreshDetail(false), 320); };
-    const remove = thread.provider === "claude" ? desktop.claude.onNotification(schedule) : desktop.codex.onNotification(schedule);
+    const schedule = () => { window.clearTimeout(timer); timer = window.setTimeout(() => void refreshDetail(false), 750); };
+    const remove = threadProvider === "claude" ? desktop.claude.onNotification(schedule) : desktop.codex.onNotification(schedule);
     return () => { window.clearTimeout(timer); remove(); };
-  }, [refreshDetail, selectedThreadId, thread]);
+  }, [refreshDetail, selectedThreadId, tab, threadProvider]);
 
   useEffect(() => {
-    if (tab !== "chat" || !window.constellationDesktop) return;
-    const poll = window.setInterval(() => void refreshDetail(false), 2500);
-    return () => window.clearInterval(poll);
-  }, [refreshDetail, tab]);
+    if (tab !== "chat" || !window.constellationDesktop || connectionStatus === "demo") return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const schedule = () => {
+      timer = window.setTimeout(async () => {
+        await refreshDetail(false);
+        if (!cancelled) schedule();
+      }, timeline?.externalRuntime ? 8000 : 20000);
+    };
+    schedule();
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [connectionStatus, refreshDetail, tab, timeline?.externalRuntime]);
 
   useEffect(() => {
     if (tab !== "chat" || !window.constellationDesktop) return;
@@ -138,12 +160,40 @@ function projectPath(cwd: string | undefined, filePath: string) {
   return `${cwd.replace(/[\\/]$/, "")}/${filePath.replace(/^\.\//, "")}`;
 }
 
+function timelineRevision(value: unknown) {
+  if (!value || typeof value !== "object" || !("items" in value) || !Array.isArray((value as ChatTimeline).items)) return "";
+  const timeline = value as ChatTimeline;
+  const items = timeline.items.map((item) => [
+    item.id,
+    item.status,
+    item.text?.length ?? 0,
+    item.text?.slice(-48) ?? "",
+    item.detail?.length ?? 0,
+    item.detail?.slice(-48) ?? "",
+    item.path ?? "",
+    item.changes?.map((change) => `${change.path}:${change.action}:${change.diff?.length ?? 0}`).join(",") ?? "",
+  ].join(":"));
+  return [timeline.threadId, timeline.status, timeline.sourceStatus, timeline.externalRuntime, timeline.inferredRuntime, timeline.turnCount, items.length, ...items].join("|");
+}
+
 function demoTimeline(provider: "codex" | "claude", threadId: string, status: ThreadStatus): ChatTimeline {
   const agent = provider === "claude" ? "Claude Code" : "Codex";
   const timelineStatus = status === "running" || status === "needs_attention" || status === "failed" || status === "completed" ? status : "idle";
-  return { provider, threadId, status: timelineStatus, turnCount: 2, items: [
+  const stressFixture = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("demoLongChat") === "1";
+  const stressItems: ChatTimeline["items"] = stressFixture ? Array.from({ length: 72 }, (_, index) => ({
+    id: `demo-stress-${index}`,
+    rawType: "commandExecution",
+    kind: "tool",
+    label: `Synthetic long item ${index + 1}`,
+    title: `verify-long-output-${index + 1}`,
+    text: `Synthetic wrapping fixture ${"unbroken".repeat(48)} /workspace/a/very/long/generated/path/that/must/stay/inside/the/chat/inspector/output-${index + 1}.txt`,
+    status: "completed",
+    timestamp: "2026-08-16T08:01:30.000Z",
+  })) : [];
+  return { provider, threadId, status: timelineStatus, turnCount: stressFixture ? 74 : 2, items: [
     { id: "demo-user-1", rawType: "userMessage", kind: "message", role: "user", text: "Audit the dashboard navigation and tighten the active-task experience.", status: "completed", timestamp: "2026-08-16T08:00:00.000Z" },
     { id: "demo-agent-1", rawType: "agentMessage", kind: "message", role: "assistant", text: `I’ll trace the current interaction, fix the highest-friction states, and verify the responsive layout.`, status: "completed", timestamp: "2026-08-16T08:00:12.000Z" },
+    ...stressItems,
     { id: "demo-tool-1", rawType: "commandExecution", kind: "tool", label: "Ran command", title: "npm test", text: "12 tests passed", status: "completed", timestamp: "2026-08-16T08:01:20.000Z" },
     { id: "demo-file-1", rawType: "fileChange", kind: "file", label: "Changed 2 files", changes: [{ path: "components/navigation.tsx", action: "updated" }, { path: "components/task-panel.tsx", action: "updated" }], status: "completed", timestamp: "2026-08-16T08:02:00.000Z" },
     { id: "demo-agent-2", rawType: "agentMessage", kind: "message", role: "assistant", text: status === "running" ? `${agent} has the navigation pass working. I’m checking keyboard focus and the compact layout now.` : `${agent} finished the navigation pass and left the task ready for its next step.`, status: status === "running" ? "running" : "completed", timestamp: "2026-08-16T08:02:18.000Z" },

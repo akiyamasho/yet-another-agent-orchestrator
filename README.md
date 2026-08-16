@@ -30,6 +30,7 @@ No local web server is needed after installation.
 - Real Claude Code project/session discovery, transcript reads, start, resume, and bounded subagent delegation through the local `claude` CLI.
 - Continue any selected main task or subagent in the **Chat** tab, with chronological provider-native transcript refresh, `Enter` to send, and local file/image attachments.
 - Inline Codex and Claude Code messages, reasoning/progress, plans, commands, tools, subagents, changed files, results, and image artifacts without flattening the conversation into a generic output list.
+- Responsive Chat history with bounded initial rendering, on-demand older items, non-overlapping provider refreshes, and aggressive wrapping for long commands, paths, URLs, and errors.
 - Secure in-app image thumbnails/enlarged previews and **Reveal in Finder** links.
 - Comfortable wide-screen typography plus 100%, 110%, and 120% interface scaling in Settings.
 - User-triggered GitHub Releases updates with exact-asset SHA-256 verification and staged rollback-safe replacement.
