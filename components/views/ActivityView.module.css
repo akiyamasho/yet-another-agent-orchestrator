@@ -178,15 +178,16 @@
 }
 
 .view { color: var(--text); }
+
 .kicker,
 .subtle,
 .count,
 .filters button,
 .eventMeta,
-.eventButton time { font-family: "IBM Plex Mono", monospace; }
+.eventButton time { font-family: var(--font-mono); }
 .kicker { color: var(--gold); }
 .heading h2 {
-    font-family: "Barlow Condensed", sans-serif;
+    font-family: var(--font-display);
     font-size: clamp(42px, 6vw, 72px);
     font-weight: 600;
     line-height: 0.9;
@@ -207,7 +208,7 @@
 .eventTitle { color: var(--text); font-weight: 500; }
 .detail { color: var(--muted); }
 .urgent .eventTitle { color: var(--gold); }
-.locate { color: var(--projector); font-family: "IBM Plex Mono", monospace; text-transform: uppercase; }
+.locate { color: var(--projector); font-family: var(--font-mono); text-transform: uppercase; }
 
 @media (min-width: 1600px) {
     .view { max-width: 1120px; }
@@ -225,3 +226,23 @@
     .eventButton time,
     .locate { font-size: 11px; }
 }
+
+/* Final material pass. */
+.view { font-family: var(--font-body, system-ui, sans-serif); padding-block: clamp(24px, 5vw, 64px); }
+.heading h2 { font-family: var(--font-display, system-ui, sans-serif); font-weight: 600; line-height: .94; font-optical-sizing: auto; }
+.kicker, .subtle, .count, .filters button, .eventMeta, .eventButton time, .locate { font-family: var(--font-mono, var(--font-mono)); }
+.filters button { border-radius: var(--radius-sm, 9px); background: var(--material-2, transparent); transition: transform 180ms var(--ease-spring, ease), background-color 180ms ease; }
+.filters button:active { transform: scale(.97); }
+.needs, .timeline { border-radius: var(--radius-lg, 18px); background: var(--material-1, rgba(10, 15, 19, .75)); box-shadow: var(--shadow-card, 0 16px 40px rgba(0, 0, 0, .18)); padding: clamp(16px, 2.5vw, 24px); }
+.needs { border-color: color-mix(in srgb, var(--gold) 42%, var(--line)); background: color-mix(in srgb, var(--gold) 6%, var(--material-1, transparent)); }
+.event { border-color: color-mix(in srgb, var(--line) 78%, transparent); }
+.eventButton { padding: 16px 6px; transition: background-color 180ms ease, transform 180ms var(--ease-spring, ease); }
+.eventButton:hover, .eventButton:focus-visible { background: color-mix(in srgb, var(--material-3, white) 18%, transparent); }
+.eventButton:active { transform: scale(.997); }
+.icon { border-radius: var(--radius-sm, 9px); background: var(--material-2, transparent); }
+.eventTitle { font-weight: 600; letter-spacing: -.01em; }
+.eventMeta b { color: var(--text); }
+.locate { border-radius: var(--radius-xs, 5px); }
+@media (prefers-reduced-motion: reduce) { .filters button, .eventButton { transition: none; } }
+@media (prefers-reduced-transparency: reduce) { .needs, .timeline, .icon { background: var(--surface-raised, var(--surface)); } }
+@media (prefers-contrast: more) { .needs, .timeline { border-color: var(--line-strong); } }

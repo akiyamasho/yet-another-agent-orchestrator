@@ -191,7 +191,7 @@
     white-space: nowrap;
     border: 1px solid currentColor;
     padding: 4px 7px 4px 5px;
-    font: 10px/1 "IBM Plex Mono", monospace;
+    font: 10px/1 var(--font-mono);
     letter-spacing: 0.04em;
 }
 .provider i {
@@ -258,16 +258,17 @@
 }
 
 .view { color: var(--text); }
+
 .kicker,
 .subtle,
 .filters button,
 .tableWrap,
 .meta,
 .attention,
-.path { font-family: "IBM Plex Mono", monospace; }
+.path { font-family: var(--font-mono); }
 .kicker { color: var(--gold); }
 .heading h2 {
-    font-family: "Barlow Condensed", sans-serif;
+    font-family: var(--font-display);
     font-size: clamp(42px, 6vw, 72px);
     font-weight: 600;
     line-height: 0.9;
@@ -311,3 +312,37 @@
     .provider,
     .attention { font-size: 11px; }
 }
+
+/* Final material pass. */
+.view { font-family: var(--font-body, system-ui, sans-serif); padding-block: clamp(24px, 5vw, 64px); }
+.heading h2 { font-family: var(--font-display, system-ui, sans-serif); font-weight: 600; line-height: .94; font-optical-sizing: auto; }
+.kicker, .subtle, .filters button, .tableWrap, .meta, .attention, .path { font-family: var(--font-mono, var(--font-mono)); }
+.primary, .filter, .filterActive { border-radius: var(--radius-sm, 9px); border-color: var(--line); background: var(--material-2, transparent); transition: transform 180ms var(--ease-spring, ease), background-color 180ms ease, border-color 180ms ease; }
+.primary:active, .filter:active, .filterActive:active { transform: scale(.98); }
+.tableWrap { border-radius: var(--radius-lg, 18px); background: var(--material-1, rgba(10, 15, 19, .75)); box-shadow: var(--shadow-card, 0 16px 40px rgba(0, 0, 0, .18)); }
+.tableWrap th, .tableWrap td { border-bottom-color: color-mix(in srgb, var(--line) 78%, transparent); }
+.group th { background: var(--material-2, var(--panel)); }
+.group button, .task { transition: background-color 180ms ease, transform 180ms var(--ease-spring, ease); }
+.group button:active, .task:active { transform: scale(.995); }
+.task strong { font-weight: 600; letter-spacing: -.01em; }
+.provider, .attention { border-radius: var(--radius-xs, 5px); }
+.selected td { background: color-mix(in srgb, var(--projector) 10%, var(--material-2, transparent)); }
+@media (prefers-reduced-motion: reduce) { .primary, .filter, .filterActive, .group button, .task { transition: none; } }
+@media (prefers-reduced-transparency: reduce) { .tableWrap, .group th { background: var(--surface-raised, var(--surface)); } }
+@media (prefers-contrast: more) { .tableWrap, .primary, .filter, .filterActive { border-color: var(--line-strong); } }
+
+/* Keep the two primary controls high-contrast above the shared material surface. */
+.primary {
+    color: var(--canvas);
+    border-color: var(--gold);
+    background: var(--gold);
+}
+.filterActive {
+    color: var(--canvas);
+    border-color: var(--projector);
+    background: var(--projector);
+}
+.primary:hover,
+.primary:focus-visible { background: color-mix(in srgb, var(--gold) 86%, white); }
+.filterActive:hover,
+.filterActive:focus-visible { background: color-mix(in srgb, var(--projector) 86%, white); }

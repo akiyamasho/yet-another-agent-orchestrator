@@ -145,7 +145,7 @@
 .palette { border-radius: 0; border-color: var(--line-strong); background: var(--panel); box-shadow: 0 28px 100px rgba(0,0,0,.58); }
 .search { border-color: var(--line); }
 .search svg { color: var(--projector); }
-.search input { color: var(--text); font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+.search input { color: var(--text); font-family: var(--font-mono); font-size: 12px; }
 .search input::placeholder { color: var(--quiet); }
 .search kbd,
 .palette footer kbd { border-radius: 0; border-color: var(--line); color: var(--quiet); }
@@ -156,9 +156,9 @@
 .result strong,
 .resultActive strong { font-weight: 500; }
 .result small,
-.resultActive small { color: var(--quiet); font-family: "IBM Plex Mono", monospace; }
+.resultActive small { color: var(--quiet); font-family: var(--font-mono); }
 .enter { color: var(--gold); }
-.palette footer { border-color: var(--line); color: var(--quiet); font-family: "IBM Plex Mono", monospace; }
+.palette footer { border-color: var(--line); color: var(--quiet); font-family: var(--font-mono); }
 
 @media (min-width: 1600px) {
     .palette { width: min(760px, 100%); }
@@ -171,4 +171,38 @@
     .result small,
     .resultActive small { font-size: 12px; }
     .palette footer { font-size: 11px; }
+}
+
+/* Floating command surface follows the same material hierarchy as the shell. */
+.scrim {
+    background: rgba(4, 7, 14, .68);
+    backdrop-filter: blur(16px) saturate(115%);
+    -webkit-backdrop-filter: blur(16px) saturate(115%);
+}
+.palette {
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-lg);
+    background: var(--material-floating);
+    box-shadow: var(--shadow-large), inset 0 1px var(--highlight);
+    backdrop-filter: blur(24px) saturate(130%);
+    -webkit-backdrop-filter: blur(24px) saturate(130%);
+}
+.search { border-bottom-color: var(--line); }
+.search input { font-family: var(--font-sans); font-size: 15px; }
+.search kbd,
+.palette footer kbd { border-radius: 6px; }
+.result,
+.resultActive { border-radius: var(--radius-sm); }
+.result:hover { background: rgba(255,255,255,.055); }
+.resultActive { box-shadow: inset 0 1px var(--highlight); }
+.resultIcon { border-radius: 8px; }
+
+@media (prefers-reduced-transparency: reduce) {
+    .scrim { background: rgba(4, 7, 14, .88); backdrop-filter: none; -webkit-backdrop-filter: none; }
+    .palette { background: var(--panel); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
+@media (prefers-contrast: more) {
+    .palette { border-color: var(--line-strong); background: var(--panel); }
+    .resultActive { border-color: var(--projector); }
 }

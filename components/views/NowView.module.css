@@ -3,8 +3,9 @@
     max-width: 1080px;
     margin: 0 auto;
     color: var(--text);
-    font-family: "IBM Plex Sans", sans-serif;
+    font-family: var(--font-body);
 }
+
 .heading {
     display: flex;
     align-items: flex-end;
@@ -16,7 +17,7 @@
     text-transform: uppercase;
     letter-spacing: 0.16em;
     color: var(--gold);
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     margin: 0 0 8px;
 }
@@ -36,7 +37,7 @@
     gap: 2px;
     text-align: right;
     color: var(--muted);
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.1em;
@@ -227,7 +228,7 @@
     align-items: center;
     gap: 4px;
     color: var(--quiet);
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     white-space: nowrap;
     overflow: hidden;
@@ -240,7 +241,7 @@
 }
 .time {
     color: var(--quiet);
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     white-space: nowrap;
     padding-top: 2px;
@@ -253,7 +254,7 @@
     border-left: 1px solid var(--line);
     background: transparent;
     color: var(--projector);
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--font-mono);
     text-transform: uppercase;
     font-size: 10px;
     padding: 9px;
@@ -326,3 +327,25 @@
         font-size: 9px;
     }
 }
+
+/* Final material overrides keep the view calm while preserving every state label. */
+.view { font-family: var(--font-body, system-ui, sans-serif); padding-block: clamp(24px, 5vw, 64px); }
+.heading h2 { font-family: var(--font-display, system-ui, sans-serif); font-weight: 600; line-height: .94; font-optical-sizing: auto; }
+.kicker, .totals, .context, .time, .locate { font-family: var(--font-mono, var(--font-mono)); }
+.section { border-radius: var(--radius-lg, 18px); background: linear-gradient(145deg, color-mix(in srgb, var(--material-2, var(--panel)) 96%, white 4%), var(--material-1, var(--panel))); box-shadow: var(--shadow-card, 0 16px 40px rgba(0, 0, 0, .18)); padding: clamp(18px, 2.5vw, 26px); }
+.sectionHead { margin-bottom: 22px; }
+.sectionHead h3 { font-size: 18px; letter-spacing: -.015em; }
+.project { border-color: color-mix(in srgb, var(--line) 78%, transparent); padding-block: 20px 6px; }
+.projectHeader h4 { font-size: 15px; letter-spacing: -.01em; }
+.providerBadge, .externalBadge { border-radius: var(--radius-xs, 5px); background: var(--material-3, transparent); font-family: var(--font-mono, var(--font-mono)); }
+.cards { gap: 12px; }
+.card { border-radius: var(--radius-md, 12px); background: var(--material-2, var(--surface)); box-shadow: 0 6px 18px rgba(0, 0, 0, .12); transition: transform 220ms var(--ease-spring, cubic-bezier(.22, 1, .36, 1)), box-shadow 220ms ease, background-color 180ms ease; }
+.card:hover { transform: translateY(-1px); box-shadow: var(--shadow-card, 0 16px 40px rgba(0, 0, 0, .18)); }
+.cardMain { padding: 14px 12px 14px 14px; }
+.cardMain:hover, .cardMain:focus-visible { background: color-mix(in srgb, var(--material-3, white) 22%, transparent); }
+.locate { border-left-color: var(--line); border-radius: 0 var(--radius-md, 12px) var(--radius-md, 12px) 0; }
+.locate:active, .cardMain:active { transform: scale(.992); }
+.empty { border-radius: var(--radius-md, 12px); background: var(--material-1, var(--surface)); }
+@media (prefers-reduced-motion: reduce) { .card, .cardMain, .locate { transition: none; } .card:hover { transform: none; } }
+@media (prefers-reduced-transparency: reduce) { .section, .card, .empty { background: var(--surface-raised, var(--surface)); } }
+@media (prefers-contrast: more) { .section, .card { border-color: var(--line-strong); } }

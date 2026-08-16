@@ -4,10 +4,10 @@
 .attachment > span { min-width: 0; flex: 1; }
 .attachment strong, .attachment small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment strong { color: var(--text); font-size: 12px; font-weight: 500; }
-.attachment small { margin-top: 2px; color: var(--quiet); font: 9px "IBM Plex Mono", monospace; }
+.attachment small { margin-top: 2px; color: var(--quiet); font: 9px var(--font-mono); }
 .attachment button { padding: 2px; color: var(--quiet); border: 0; background: transparent; cursor: pointer; }
 .inputRow { min-width: 0; display: grid; grid-template-columns: 38px minmax(0, 1fr) 42px; align-items: stretch; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line)); background: #080c0f; }
-.inputRow textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 58px; max-height: 160px; resize: vertical; padding: 11px 8px; color: var(--text); border: 0; outline: 0; background: transparent; font: 13px/1.5 "IBM Plex Sans", sans-serif; overflow-wrap: anywhere; word-break: break-word; }
+.inputRow textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 58px; max-height: 160px; resize: vertical; padding: 11px 8px; color: var(--text); border: 0; outline: 0; background: transparent; font: 13px/1.5 var(--font-body); overflow-wrap: anywhere; word-break: break-word; }
 .inputRow textarea::placeholder { color: #6f7b81; }
 .attachButton, .sendButton { display: grid; place-items: center; margin: 0; padding: 0; border: 0; background: transparent; cursor: pointer; }
 .attachButton { color: var(--muted); border-right: 1px solid var(--line); }
@@ -15,12 +15,25 @@
 .attachButton:hover:not(:disabled) { color: var(--projector); }
 .sendButton:hover:not(:disabled) { filter: brightness(1.08); }
 .attachButton:disabled, .sendButton:disabled { cursor: not-allowed; opacity: .34; }
-.footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 7px; color: var(--quiet); font: 9px/1.35 "IBM Plex Mono", monospace; letter-spacing: .03em; }
+.footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 7px; color: var(--quiet); font: 9px/1.35 var(--font-mono); letter-spacing: .03em; }
 .footer kbd { color: var(--muted); font: inherit; }
-.error, .notice { max-width: 100%; margin: 8px 0 0; font: 10px/1.45 "IBM Plex Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.error, .notice { max-width: 100%; margin: 8px 0 0; font: 10px/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .error { color: #e58d83; }
 .notice { color: #8fae92; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (min-width: 1800px) { .composer { padding: 16px 24px 18px; } .inputRow textarea { min-height: 66px; font-size: 15px; } .attachment strong { font-size: 13px; } .footer { font-size: 10px; } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+.composer { font-family: var(--font-body, system-ui, sans-serif); }
+.attachment { border-radius: var(--radius-sm); background: var(--material-2); box-shadow: 0 8px 22px rgba(0, 0, 0, .18); transition: border-color 160ms var(--ease-spring), background 160ms var(--ease-spring), transform 120ms ease-out; }
+.attachment:hover, .attachment:focus-within { border-color: var(--line-strong); }
+.attachment:active { transform: scale(.985); }
+.inputRow { border-radius: var(--radius-md); border-color: var(--line-strong); background: var(--material-3); box-shadow: 0 8px 24px rgba(0, 0, 0, .22); }
+.inputRow:focus-within { border-color: var(--projector, #7aa7b8); box-shadow: 0 0 0 2px color-mix(in srgb, var(--projector, #7aa7b8) 20%, transparent), 0 8px 24px rgba(0, 0, 0, .22); }
+.attachButton, .sendButton { transition: color 160ms var(--ease-spring), background 160ms var(--ease-spring), transform 120ms ease-out; }
+.attachButton:active:not(:disabled), .sendButton:active:not(:disabled) { transform: scale(.96); }
+.sendButton { border-radius: 0 var(--radius-md) var(--radius-md) 0; }
+.footer { font-family: var(--font-mono); }
+@media (prefers-reduced-transparency: reduce) { .attachment, .inputRow { background: #0b1014; box-shadow: none; } }
+@media (prefers-contrast: more) { .inputRow, .attachment { border-color: #e1edf2; } }

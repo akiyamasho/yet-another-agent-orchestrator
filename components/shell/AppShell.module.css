@@ -53,7 +53,7 @@
     display: block;
 }
 .brand strong {
-    font-family: "Barlow Condensed", sans-serif;
+    font-family: var(--font-display);
     font-size: 17px;
     font-weight: 600;
     line-height: 1;
@@ -63,7 +63,7 @@
 .brand small {
     margin-top: 6px;
     color: var(--gold);
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--font-mono);
     font-size: 8px;
     letter-spacing: 0.13em;
     text-transform: uppercase;
@@ -137,13 +137,13 @@
 .folderText small {
     margin-top: 3px;
     color: var(--quiet);
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--font-mono);
     font-size: 9px;
 }
 .counts {
     display: flex;
     gap: 4px;
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--font-mono);
     font-size: 9px;
 }
 .counts b,
@@ -169,7 +169,7 @@
     padding: 0 9px;
     color: var(--muted);
     border: 1px solid var(--line);
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--font-mono);
     font-size: 10px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -227,7 +227,7 @@
     gap: 9px;
     overflow: hidden;
     color: var(--text);
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--font-mono);
     font-size: 9px;
     letter-spacing: 0.09em;
     text-overflow: ellipsis;
@@ -255,7 +255,7 @@
     padding: 0 8px;
     border: 1px solid var(--line);
     color: var(--quiet);
-    font: 500 8px "IBM Plex Mono", monospace;
+    font: 500 8px var(--font-mono);
     letter-spacing: 0.1em;
     white-space: nowrap;
 }
@@ -295,7 +295,7 @@
     align-items: center;
     gap: 6px;
     padding: 6px 11px;
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--font-mono);
     font-size: 9px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -316,7 +316,7 @@
     gap: 8px;
     padding: 7px 10px;
     border: 1px solid var(--line);
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--font-mono);
     font-size: 9px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -341,7 +341,7 @@
     border: 1px solid var(--line);
     background: rgba(8, 8, 8, 0.25);
     cursor: pointer;
-    font-family: "IBM Plex Mono", monospace;
+    font-family: var(--font-mono);
     font-size: 9px;
     letter-spacing: 0.09em;
     text-transform: uppercase;
@@ -377,9 +377,7 @@
     place-items: center;
     color: var(--canvas);
     background: var(--gold);
-    font:
-        500 8px "IBM Plex Mono",
-        monospace;
+    font: 500 8px var(--font-mono);
 }
 .content {
     position: relative;
@@ -403,13 +401,13 @@
 .emptyState > p {
     margin: 22px 0 5px;
     color: var(--gold);
-    font: 500 9px "IBM Plex Mono", monospace;
+    font: 500 9px var(--font-mono);
     letter-spacing: 0.18em;
 }
 .emptyState h1 {
     max-width: 620px;
     margin: 0;
-    font: 500 clamp(34px, 5vw, 72px)/0.98 "Barlow Condensed", sans-serif;
+    font: 500 clamp(34px, 5vw, 72px)/0.98 var(--font-display);
     letter-spacing: -0.02em;
     text-transform: uppercase;
 }
@@ -430,7 +428,7 @@
     border: 1px solid var(--gold);
     background: var(--gold);
     cursor: pointer;
-    font: 500 9px "IBM Plex Mono", monospace;
+    font: 500 9px var(--font-mono);
     letter-spacing: 0.1em;
     text-transform: uppercase;
 }
@@ -580,4 +578,76 @@
 @media (max-width: 680px) {
     .shell { --rail-width: 60px; }
     .commandBar { height: auto; }
+}
+
+/* Layered system chrome: structural materials stay quiet while controls lift
+   into lighter, rounded interactive surfaces. */
+.shell {
+    --rail-width: 248px;
+    background: var(--canvas);
+}
+.railCollapsed { --rail-width: 72px; }
+.rail {
+    padding: 24px 12px 16px;
+    gap: 20px;
+    border-right-color: var(--line);
+    background: var(--material-structural);
+    box-shadow: 10px 0 32px rgba(0, 0, 0, .12);
+    backdrop-filter: blur(22px) saturate(125%);
+    -webkit-backdrop-filter: blur(22px) saturate(125%);
+    transition: width 260ms cubic-bezier(.22, 1, .36, 1), flex-basis 260ms cubic-bezier(.22, 1, .36, 1);
+}
+.brandMark { border-radius: var(--radius-sm); background: rgba(122, 167, 184, .1); box-shadow: inset 0 1px var(--highlight); }
+.folderNav { border-top-color: var(--line); }
+.folderItem,
+.utility,
+.collapse,
+.addFolder { border-bottom-color: transparent; border-radius: var(--radius-sm); }
+.folderItem:hover,
+.utility:hover,
+.collapse:hover { background: var(--material-interactive); box-shadow: inset 0 1px var(--highlight); }
+.folderActive { border-radius: var(--radius-sm); background: rgba(122, 167, 184, .13); box-shadow: inset 3px 0 var(--accent, var(--projector)), inset 0 1px var(--highlight); }
+.counts b,
+.counts i { border-radius: 7px; background: rgba(255, 255, 255, .035); }
+.addFolder { border-color: var(--line); background: rgba(255, 255, 255, .025); }
+.addFolder:hover { color: var(--canvas); background: var(--gold); box-shadow: var(--shadow-small); }
+.commandBar {
+    height: 70px;
+    padding: 0 22px;
+    border-bottom-color: var(--line);
+    background: var(--material-structural);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .1);
+    backdrop-filter: blur(22px) saturate(125%);
+    -webkit-backdrop-filter: blur(22px) saturate(125%);
+}
+.connection,
+.segmented,
+.searchTrigger,
+.newAgent,
+.attentionButton { border-radius: var(--radius-sm); box-shadow: inset 0 1px var(--highlight); }
+.connection { background: rgba(255, 255, 255, .025); }
+.segmented { padding: 3px; border-color: var(--line); background: rgba(7, 10, 17, .56); }
+.segmented button { min-height: 30px; border-radius: 8px; }
+.segmented button + button { border-left: 0; }
+.segmented button:hover { color: var(--text) !important; background: rgba(255, 255, 255, .08) !important; }
+.segmented button.segmentActive { color: var(--canvas) !important; background: var(--projector) !important; box-shadow: 0 3px 12px rgba(122, 167, 184, .2); }
+.searchTrigger,
+.newAgent,
+.attentionButton { background: rgba(255, 255, 255, .035); }
+.searchTrigger:hover,
+.attentionButton:hover { background: var(--material-interactive); box-shadow: inset 0 1px var(--highlight), var(--shadow-small); }
+.newAgent:hover { box-shadow: var(--shadow-small); }
+.attentionButton span { border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+.content { background: var(--canvas); }
+.emptyState { background: radial-gradient(circle at 50% 42%, rgba(122, 167, 184, .1), transparent 32%), var(--canvas); }
+.emptyState button { border-radius: var(--radius-sm); box-shadow: var(--shadow-small); }
+
+@media (max-width: 680px) {
+    .shell { --rail-width: 60px; }
+    .rail { padding-inline: 6px; }
+    .commandBar { height: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rail { transition: none; }
 }

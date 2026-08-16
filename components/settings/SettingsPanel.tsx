@@ -15,7 +15,7 @@ type UpdateState = {
 };
 
 export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [update, setUpdate] = useState<UpdateState>({ phase: "idle", currentVersion: "0.3.0" });
+  const [update, setUpdate] = useState<UpdateState>({ phase: "idle", currentVersion: "0.4.0" });
   const [scale, setScale] = useState(1);
   const desktop = typeof window !== "undefined" ? window.constellationDesktop : undefined;
 

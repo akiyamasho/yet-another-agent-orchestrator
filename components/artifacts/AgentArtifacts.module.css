@@ -31,3 +31,16 @@
   .content small, .imageInfo small, .role, .message time, .statusText { font-size: 11px; }
   .loading, .error, .empty { font-size: 14px; }
 }
+
+.root { font-family: var(--font-body, system-ui, sans-serif); }
+.task, .file, .message, .imageCard, .loading, .error, .empty { border-radius: var(--radius-sm); box-shadow: 0 8px 22px rgba(0, 0, 0, .18); }
+.task, .file { background: var(--material-2); border-left-width: 3px; }
+.imageCard { background: var(--material-1); border-color: var(--line); }
+.preview, .rowActions button, .iconAction, .more { transition: color 160ms var(--ease-spring), background 160ms var(--ease-spring), border-color 160ms var(--ease-spring), transform 120ms ease-out; }
+.preview:hover, .preview:focus-visible { outline: 2px solid var(--gold, #e2b84b); outline-offset: -2px; }
+.preview:active, .rowActions button:active, .iconAction:active, .more:active { transform: scale(.98); }
+.rowActions button:focus-visible, .iconAction:focus-visible, .more:focus-visible { outline: 2px solid var(--gold, #e2b84b); outline-offset: 3px; }
+.message { background: var(--material-2); border-left-width: 2px; }
+.skeletons i { border-radius: 5px; }
+@media (prefers-reduced-transparency: reduce) { .task, .file, .message, .imageCard, .loading, .error, .empty { background: #10161b; box-shadow: none; } }
+@media (prefers-contrast: more) { .task, .file, .message, .imageCard, .loading, .error, .empty { border-color: #e1edf2; } }
