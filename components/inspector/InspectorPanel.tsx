@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronRight, CircleAlert, Clock3, Pause, Play, Square, X } from "lucide-react";
 import { AgentArtifacts, parseAgentArtifacts, type AgentArtifact } from "@/components/artifacts/AgentArtifacts";
+import { ThreadComposer } from "@/components/inspector/ThreadComposer";
 import { providerMeta, splitProviderThreadId } from "@/lib/providers";
 import { useConstellationStore } from "@/lib/store/useConstellationStore";
 import type { ThreadStatus } from "@/lib/types";
@@ -30,6 +31,7 @@ export function InspectorPanel({ threadId, onClose, onAddSubagent, onEdit, onArc
   const updateThread = useConstellationStore((s) => s.updateThread);
   const connectionStatus = useConstellationStore((s) => s.connectionStatus);
   const selectThread = useConstellationStore((s) => s.selectThread);
+  const syncFromSource = useConstellationStore((s) => s.syncFromSource);
   const children = useMemo(() => thread ? Object.values(threads).filter((item) => item.parentId === thread.id && !item.archived) : [], [thread, threads]);
   const activity = useMemo(() => thread ? Object.values(events).filter((event) => event.threadId === thread.id).sort((a, b) => b.timestamp.localeCompare(a.timestamp)) : [], [thread, events]);
   const baseArtifacts = useMemo(() => parseAgentArtifacts(detail, { provider: thread?.provider ?? "codex" }), [detail, thread?.provider]);
@@ -48,6 +50,21 @@ export function InspectorPanel({ threadId, onClose, onAddSubagent, onEdit, onArc
   }, [folder?.path]);
   const reveal = useCallback(async (filePath: string) => { await window.constellationDesktop?.files.reveal(projectPath(folder?.path, filePath)); }, [folder?.path]);
 
+  const refreshDetail = useCallback(async (showLoading = false) => {
+    if (!selectedThreadId || !thread || !window.constellationDesktop) return;
+    if (showLoading) setDetailLoading(true);
+    setDetailError(undefined);
+    const { rawId } = splitProviderThreadId(selectedThreadId);
+    try {
+      const response = thread.provider === "claude" ? await window.constellationDesktop.claude.readSession(rawId) : await window.constellationDesktop.codex.readThread(rawId);
+      setDetail(response);
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (showLoading) setDetailLoading(false);
+    }
+  }, [selectedThreadId, thread]);
+
   useEffect(() => {
     if (tab !== "output" || !selectedThreadId || !thread || !window.constellationDesktop) return;
     let cancelled = false;
@@ -57,6 +74,15 @@ export function InspectorPanel({ threadId, onClose, onAddSubagent, onEdit, onArc
     request.then((response) => { if (!cancelled) setDetail(response); }).catch((error) => { if (!cancelled) setDetailError(error instanceof Error ? error.message : String(error)); }).finally(() => { if (!cancelled) setDetailLoading(false); });
     return () => { cancelled = true; };
   }, [selectedThreadId, tab, thread?.provider]);
+
+  useEffect(() => {
+    const desktop = window.constellationDesktop;
+    if (!desktop || !selectedThreadId || !thread) return;
+    let timer: number | undefined;
+    const schedule = () => { window.clearTimeout(timer); timer = window.setTimeout(() => void refreshDetail(false), 320); };
+    const remove = thread.provider === "claude" ? desktop.claude.onNotification(schedule) : desktop.codex.onNotification(schedule);
+    return () => { window.clearTimeout(timer); remove(); };
+  }, [refreshDetail, selectedThreadId, thread]);
 
   useEffect(() => {
     if (tab !== "output" || !window.constellationDesktop) return;
@@ -91,6 +117,7 @@ export function InspectorPanel({ threadId, onClose, onAddSubagent, onEdit, onArc
       {tab === "activity" && <section className={styles.timeline}>{activity.length ? activity.map((event) => <article key={event.id}><span className={`${styles.eventDot} ${styles[event.type]}`} /><div><strong>{event.title}</strong><p>{event.detail}</p><time>{formatTime(event.timestamp)}</time></div></article>) : <p className={styles.empty}>No activity recorded for this thread.</p>}</section>}
       {tab === "output" && <section className={styles.output}><div className={styles.card}><label>Latest summary</label><p>{thread.summary}</p></div>{focusedPreview && <div className={styles.focusedPreview}><button onClick={() => setFocusedPreview(undefined)} aria-label="Close image preview"><X size={14}/></button><img src={focusedPreview.dataUrl} alt={focusedPreview.name}/><div><strong>{focusedPreview.name}</strong><small>{focusedPreview.path}</small><button onClick={() => void reveal(focusedPreview.path)}>Reveal in Finder</button></div></div>}<AgentArtifacts artifacts={artifacts} loading={detailLoading} error={detailError} emptyLabel={`No readable ${provider.label} task output or file activity yet.`} onPreview={(filePath: string, _artifact: AgentArtifact) => void loadPreview(filePath, true)} onReveal={(filePath: string) => void reveal(filePath)} /></section>}
     </div>
+    <ThreadComposer thread={thread} cwd={folder.path} onSent={async () => { setTab("output"); await syncFromSource(); window.setTimeout(() => void refreshDetail(false), 450); window.setTimeout(() => void refreshDetail(false), 1600); }} />
   </aside>;
 }
 

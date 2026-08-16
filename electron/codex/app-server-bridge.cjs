@@ -147,12 +147,21 @@ class CodexAppServerBridge extends EventEmitter {
   readThread(threadId, options = {}) { return this.request('thread/read', { threadId, ...options }); }
   startThread(params = {}) { return this.request('thread/start', params); }
   resumeThread(threadId, params = {}) { return this.request('thread/resume', { threadId, ...params }); }
-  startTurn(threadId, text, params = {}) {
+  startTurn(threadId, input, params = {}) {
+    const items = typeof input === 'string'
+      ? [{ type: 'text', text: input, text_elements: [] }]
+      : Array.isArray(input) ? input : [];
     return this.request('turn/start', {
       threadId,
-      input: [{ type: 'text', text, text_elements: [] }],
+      input: items,
       ...params,
     });
+  }
+  steerTurn(threadId, turnId, input) {
+    const items = typeof input === 'string'
+      ? [{ type: 'text', text: input, text_elements: [] }]
+      : Array.isArray(input) ? input : [];
+    return this.request('turn/steer', { threadId, expectedTurnId: turnId, input: items });
   }
   setThreadName(threadId, name) { return this.request('thread/setName', { threadId, name }); }
   updateThreadSettings(threadId, params = {}) { return this.request('thread/settings/update', { threadId, ...params }); }

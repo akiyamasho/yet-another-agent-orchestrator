@@ -24,3 +24,10 @@
 .skeletons { display: grid; gap: 6px; }.skeletons i { display: block; height: 38px; background: linear-gradient(90deg, #10171b, #1e292d, #10171b); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
 @keyframes spin { to { transform: rotate(360deg); } } @keyframes shimmer { to { background-position: -200% 0; } }
 @media (max-width: 430px) { .imageGrid { grid-template-columns: 1fr; } .statusText { display: none; } }
+@media (min-width: 1800px) {
+  .sectionTitle, .count { font-size: 12px; }
+  .content strong, .imageInfo strong { font-size: 14px; }
+  .content p, .message p { font-size: 13px; }
+  .content small, .imageInfo small, .role, .message time, .statusText { font-size: 11px; }
+  .loading, .error, .empty { font-size: 14px; }
+}

@@ -147,9 +147,10 @@ Separate but cross-linked entities:
 
 ### 5.4 Map overview
 
-- A quiet animated core in the center represents the local Codex workspace.
+- A quiet animated core in the center represents all local agent projects.
 - Folders are arranged radially around it, each with a labeled colored hub.
-- Main agents branch from each folder hub; subagents appear as smaller descendants.
+- Main agents occupy a circular ring around the selected folder hub. Only the selected root expands its subagent descendants into an outward angular branch, preventing labels from colliding with the project name.
+- Connectors are thin radial rays. Solid rays connect projects to main agents; lighter dashed rays connect subagents. There are no org-chart arrowheads or rectangular routing elbows.
 - Far zoom: folder hub, name, aggregate counts, status mixture.
 - Mid zoom: main agents, short task labels, state rings, immediate subagent count.
 - Near zoom: subagent labels, handoff edges, runtime, and tiny activity markers.
@@ -212,6 +213,14 @@ Tabs:
    - Every verified local artifact has a `Reveal in Finder` action. Relative paths resolve against the task’s recorded project `cwd`.
 
 File access is mediated by narrow Electron IPC. The renderer cannot read arbitrary files: preview/reveal accepts only canonical paths under a project root already discovered from a provider task or explicitly registered by the user. Preview is limited to supported image formats and 25 MB; the main process returns a decoded data URL instead of exposing `file://` access.
+
+### 6.1 Continue the selected chat
+
+- A persistent composer remains at the bottom of the inspector for every non-archived main agent and subagent.
+- `Enter` sends; `Shift+Enter` inserts a newline. The composer accepts up to 10 explicitly selected local files, each capped at 25 MB, and shows removable attachment chips before sending.
+- Codex resumes the exact provider thread. If the latest turn is active, Constellation uses `turn/steer` with its expected turn id; otherwise it starts a new turn. Images are sent as App Server `localImage` input items, while other files are supplied as canonical project paths in the text input.
+- Claude Code resumes the exact session with `claude -p --resume <session-id>`. Attachments use explicit `@path` references and `--add-dir` grants when a selected file is outside the task cwd.
+- Sending never creates a renderer-only continuation. The transcript refreshes from the provider source of truth and continues updating from live notifications.
 
 Attention state:
 
@@ -357,6 +366,13 @@ interface AgentRepository {
 - Keep the adapter replaceable, but keep the live adapter as the default. The browser-only Next dev preview may use the existing representative dataset behind an explicit `DEMO_DATA`/development flag and must show a `DEMO / NOT CONNECTED TO CODEX` indicator. Packaged Electron builds fail visibly into an empty disconnected state rather than loading demo data.
 - No Three.js in v1. Introduce Sigma.js/WebGL only after real profiling shows SVG/DOM is the bottleneck.
 
+### 11.1 GitHub Releases updater
+
+- Settings exposes a manual `Check for updates` flow against this repository's latest GitHub Release. The app never performs a background download without user action.
+- A compatible release contains `Constellation-<version>-<arch>.zip` and `SHA256SUMS.txt`. The app downloads both over HTTPS, matches the checksum to the exact filename, verifies SHA-256, expands to a staging directory, and validates the bundle identifier and version before offering installation.
+- Installation is a transparent community-build replacement: after the user confirms, a detached helper waits for Constellation to exit, keeps a same-directory backup, moves the verified app into place, relaunches it, and deletes the backup only after a later successful launch.
+- This is intentionally not presented as Apple notarization. [Electron's standard macOS auto-update path requires a code-signed application](https://www.electronjs.org/docs/latest/api/auto-updater/); unsigned releases retain the security disclaimer and manual GitHub fallback. Version 0.2.0 is the one-time manual upgrade that introduces in-app updates for subsequent releases.
+
 Suggested source layout:
 
 ```text
@@ -389,9 +405,10 @@ lib/
 
 ## 13. Responsive behavior
 
-- Desktop ≥1180 px: rail + canvas + overlay inspector.
+- Desktop ≥1180 px: rail + canvas + overlay inspector. Operational copy uses a comfortable minimum size, with a larger wide-display scale at ≥1800 px.
 - Tablet 768–1179 px: collapsed rail; inspector width 400 px.
 - Mobile <768 px: map remains pannable; inspector becomes a 92%-height bottom sheet; view switcher moves to bottom navigation; default to List because detailed spatial manipulation is secondary.
+- Settings offers 100%, 110%, and 120% interface scaling independently of the map's pan/zoom controls.
 
 ## 14. Accessibility requirements
 
@@ -417,6 +434,8 @@ The delivered app must:
 8. Pass TypeScript/build checks and have no obvious console errors. Packaged Electron launch must work without `pnpm start` or a separate web server.
 9. Maintain useful controls if ambient particles or advanced motion fail.
 10. Avoid placeholder-style generic dashboard visuals: no white card grid, no neon gradient headline, and no fake 3D perspective that harms readability.
+11. Resume any selected Codex or Claude Code main agent/subagent from the inspector, including explicitly selected file attachments, without changing provider identity or task context.
+12. Check, download, SHA-256 verify, stage, and install a compatible newer GitHub Release from Settings, while keeping unsigned-build warnings explicit.
 
 ## 16. Integration hardening plan
 

@@ -159,3 +159,16 @@
 .resultActive small { color: var(--quiet); font-family: "IBM Plex Mono", monospace; }
 .enter { color: var(--gold); }
 .palette footer { border-color: var(--line); color: var(--quiet); font-family: "IBM Plex Mono", monospace; }
+
+@media (min-width: 1600px) {
+    .palette { width: min(760px, 100%); }
+    .search { padding: 19px 21px; }
+    .search input { font-size: 15px; }
+    .result,
+    .resultActive { padding: 13px; }
+    .result strong,
+    .resultActive strong { font-size: 14px; }
+    .result small,
+    .resultActive small { font-size: 12px; }
+    .palette footer { font-size: 11px; }
+}

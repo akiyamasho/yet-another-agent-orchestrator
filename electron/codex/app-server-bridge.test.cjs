@@ -16,6 +16,8 @@ function fakeSpawn() {
     const message = JSON.parse(String(chunk));
     if (message.method === 'initialize') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: 2 } }) + '\n');
     if (message.method === 'thread/list') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { data: [{ id: message.params.archived ? 'archived' : 'active' }], nextCursor: null } }) + '\n');
+    if (message.method === 'turn/start') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { turn: { id: 'turn-1' }, received: message.params } }) + '\n');
+    if (message.method === 'turn/steer') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { turnId: message.params.expectedTurnId, received: message.params } }) + '\n');
   });
   return child;
 }
@@ -34,5 +36,20 @@ test('emits JSON-RPC notifications', async () => {
   const notification = new Promise((resolve) => bridge.once('thread/started', resolve));
   bridge._child.stdout.write(JSON.stringify({ method: 'thread/started', params: { thread: { id: 't1' } } }) + '\n');
   assert.deepEqual(await notification, { thread: { id: 't1' } });
+  bridge.close();
+});
+
+test('starts and steers turns with provider-native attachment inputs', async () => {
+  const bridge = new CodexAppServerBridge({ spawn: () => fakeSpawn(), requestTimeoutMs: 500 });
+  await bridge.connect();
+  const input = [
+    { type: 'text', text: 'Review this screenshot' },
+    { type: 'localImage', path: '/tmp/design.png' },
+  ];
+  const started = await bridge.startTurn('thread-1', input);
+  assert.deepEqual(started.received.input, input);
+  const steered = await bridge.steerTurn('thread-1', 'turn-1', input);
+  assert.equal(steered.turnId, 'turn-1');
+  assert.deepEqual(steered.received.input, input);
   bridge.close();
 });

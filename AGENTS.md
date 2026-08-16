@@ -45,4 +45,10 @@ make release   # macOS DMG and ZIP
 4. Keep repository screenshots synthetic; regenerate from browser demo mode only.
 5. Check that no secrets, absolute personal paths, or provider transcripts are staged.
 
+## Release invariants
+
+- Every published version must regenerate and visually review every screenshot shown in `README.md` from the synthetic browser fixtures only.
+- README screenshots must reflect the exact UI shipped in that release; never reuse stale screenshots from an earlier version.
+- Never capture real provider projects, paths, prompts, transcripts, attachments, or task names for release documentation.
+
 Prefer small provider-neutral UI components, tolerant parsing at external boundaries, and explicit error states. Preserve the cinematic director-portfolio visual language and reduced-motion behavior.

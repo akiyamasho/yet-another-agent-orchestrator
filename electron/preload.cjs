@@ -3,18 +3,36 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("constellationDesktop", {
   platform: process.platform,
   isDesktop: true,
+  appearance: {
+    getScale: () => ipcRenderer.invoke("appearance:get-scale"),
+    setScale: (value) => ipcRenderer.invoke("appearance:set-scale", value),
+  },
   selectDirectory: () => ipcRenderer.invoke("folders:select"),
   projects: {
     list: () => ipcRenderer.invoke("projects:list"),
     add: (projectPath) => ipcRenderer.invoke("projects:add", projectPath),
   },
+  updates: {
+    getState: () => ipcRenderer.invoke("updates:get-state"),
+    check: () => ipcRenderer.invoke("updates:check"),
+    download: () => ipcRenderer.invoke("updates:download"),
+    install: () => ipcRenderer.invoke("updates:install"),
+    openRelease: () => ipcRenderer.invoke("updates:open-release"),
+    onStatus: (listener) => {
+      const handler = (_event, state) => listener(state);
+      ipcRenderer.on("updates:status", handler);
+      return () => ipcRenderer.removeListener("updates:status", handler);
+    },
+  },
   files: {
+    selectAttachments: (input) => ipcRenderer.invoke("files:select-attachments", input),
     preview: (filePath) => ipcRenderer.invoke("files:preview", filePath),
     reveal: (filePath) => ipcRenderer.invoke("files:reveal", filePath),
   },
   codex: {
     getSnapshot: () => ipcRenderer.invoke("codex:snapshot"),
     readThread: (threadId) => ipcRenderer.invoke("codex:read-thread", threadId),
+    continueThread: (input) => ipcRenderer.invoke("codex:continue-thread", input),
     startThread: (input) => ipcRenderer.invoke("codex:start-thread", input),
     startSubagent: (input) => ipcRenderer.invoke("codex:start-subagent", input),
     updateThread: (input) => ipcRenderer.invoke("codex:update-thread", input),
@@ -35,6 +53,7 @@ contextBridge.exposeInMainWorld("constellationDesktop", {
   claude: {
     getSnapshot: () => ipcRenderer.invoke("claude:snapshot"),
     readSession: (sessionId) => ipcRenderer.invoke("claude:read-session", sessionId),
+    continueSession: (input) => ipcRenderer.invoke("claude:continue-session", input),
     startSession: (input) => ipcRenderer.invoke("claude:start-session", input),
     startSubagent: (input) => ipcRenderer.invoke("claude:start-subagent", input),
     resumeSession: (input) => ipcRenderer.invoke("claude:resume-session", input),

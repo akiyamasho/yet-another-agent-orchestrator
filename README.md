@@ -11,9 +11,11 @@ No local web server is needed after installation.
 
 ![Provider-aware task list using synthetic data](docs/screenshots/constellation-demo-list.png)
 
-![Task inspector using synthetic data](docs/screenshots/constellation-demo-inspector.png)
+![Task inspector, subagent branch, and continuation composer using synthetic data](docs/screenshots/constellation-demo-inspector.png)
 
 ![Cross-project quick jump using synthetic data](docs/screenshots/constellation-demo-quick-jump.png)
+
+![Interface scale and GitHub Releases update settings](docs/screenshots/constellation-demo-settings.png)
 
 </details>
 
@@ -26,8 +28,11 @@ No local web server is needed after installation.
 - Provider identity everywhere: Codex is projector blue; Claude Code is warm coral.
 - Real Codex task discovery, transcript reads, live notifications, start, rename, settings, archive, restore, and delete through `codex app-server`.
 - Real Claude Code project/session discovery, transcript reads, start, resume, and bounded subagent delegation through the local `claude` CLI.
+- Continue any selected main task or subagent in the inspector, with live provider transcript refresh, `Enter` to send, and local file/image attachments.
 - Provider-neutral task/plan state, messages, commands, changed files, and image artifacts.
 - Secure in-app image thumbnails/enlarged previews and **Reveal in Finder** links.
+- Comfortable wide-screen typography plus 100%, 110%, and 120% interface scaling in Settings.
+- User-triggered GitHub Releases updates with exact-asset SHA-256 verification and staged rollback-safe replacement.
 - A packaged macOS app that loads its static Next.js renderer directly—no `pnpm start`.
 
 ## Data-source honesty
@@ -47,6 +52,8 @@ xattr -dr com.apple.quarantine /Applications/Constellation.app
 ```
 
 Security disclaimer: `xattr -dr com.apple.quarantine` bypasses macOS’s first-launch quarantine check for that app bundle. It does **not** verify the author or make the app signed. Use it only after confirming the download came from this repository’s Releases page; never apply it broadly to `/Applications` or another directory.
+
+Version 0.2.0 is a one-time manual install because older versions do not contain the updater. From 0.2.0 onward, open **Settings → Software updates** to check GitHub Releases, download the matching Apple Silicon ZIP, verify its published SHA-256, and install it in place. This often avoids repeating a browser-download quarantine step, but it does not make the unsigned app signed or notarized; macOS may still apply local security policy.
 
 Requirements at runtime: a working local `codex` installation, a working local `claude` installation, or both. A provider can be offline while the other remains usable.
 
@@ -68,8 +75,9 @@ The direct npm scripts remain available in `package.json`.
 ## Privacy and security
 
 - Electron uses context isolation, sandboxing, no renderer Node integration, and a narrow preload API.
-- Preview/reveal canonicalizes paths and only allows files beneath a provider-discovered or explicitly registered project root.
+- Preview/reveal canonicalizes paths and only allows files beneath a provider-discovered or explicitly registered project root. Composer attachments outside those roots require an explicit native file-picker grant that expires after one hour.
 - Image preview accepts supported local image formats up to 25 MB and returns a decoded data URL; the renderer receives no arbitrary filesystem API.
+- Updates require an explicit check/download/install action, verify the exact ZIP against `SHA256SUMS.txt`, validate bundle id/version before replacement, and retain a recoverable previous app until a successful relaunch.
 - Registered folders and Claude presentation overlays live in Electron `userData`. Provider-owned histories remain the source of truth.
 
 ## Documentation

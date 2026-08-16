@@ -525,3 +525,47 @@
         transition: none;
     }
 }
+
+/* Final legibility overrides live last so the director-theme layer cannot shrink them. */
+.shell {
+    --rail-width: 286px;
+}
+
+.brand strong { font-size: 20px; }
+.brand small { font-size: 9px; }
+.folderItem { min-height: 56px; }
+.folderText strong { font-size: 14px; }
+.folderText small { font-size: 10px; }
+.counts { font-size: 10px; }
+.addFolder,
+.utility { font-size: 11px; }
+.commandBar { height: 76px; }
+.breadcrumb { font-size: 11px; }
+.connection,
+.connection small { font-size: 9px; }
+.segmented button,
+.searchTrigger,
+.newAgent { font-size: 10px; }
+
+@media (min-width: 1800px) {
+    .shell { --rail-width: 318px; }
+    .rail { padding-left: 18px; padding-right: 18px; }
+    .brand strong { font-size: 23px; }
+    .brand small { font-size: 10px; }
+    .folderItem { min-height: 62px; }
+    .folderText strong { font-size: 16px; }
+    .folderText small { font-size: 11px; }
+    .counts { font-size: 11px; }
+    .commandBar { height: 82px; padding-inline: 30px; }
+    .breadcrumb { font-size: 12px; }
+    .connection,
+    .connection small,
+    .segmented button,
+    .searchTrigger,
+    .newAgent { font-size: 11px; }
+}
+
+@media (max-width: 680px) {
+    .shell { --rail-width: 60px; }
+    .commandBar { height: auto; }
+}

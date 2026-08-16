@@ -208,3 +208,20 @@
 .detail { color: var(--muted); }
 .urgent .eventTitle { color: var(--gold); }
 .locate { color: var(--projector); font-family: "IBM Plex Mono", monospace; text-transform: uppercase; }
+
+@media (min-width: 1600px) {
+    .view { max-width: 1120px; }
+    .kicker { font-size: 12px; }
+    .subtle,
+    .count { font-size: 13px; }
+    .filters button { font-size: 13px; padding: 9px 13px; }
+    .needs,
+    .timeline { padding: 21px; }
+    .sectionHead h3 { font-size: 15px; }
+    .eventButton { padding: 18px 6px; }
+    .eventTitle { font-size: 15px; }
+    .eventMeta,
+    .detail { font-size: 13px; }
+    .eventButton time,
+    .locate { font-size: 11px; }
+}

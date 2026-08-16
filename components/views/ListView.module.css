@@ -292,3 +292,22 @@
 .path { color: var(--quiet); }
 .selected td { background: rgba(122, 167, 184, 0.08); }
 .attention { border-radius: 0; color: var(--gold); border-color: rgba(226,184,75,.42); background: rgba(226,184,75,.06); }
+
+@media (min-width: 1600px) {
+    .view { max-width: 1360px; }
+    .kicker { font-size: 12px; }
+    .subtle { font-size: 12px; }
+    .primary,
+    .filter,
+    .filterActive { font-size: 13px; padding: 11px 15px; }
+    .tableWrap table { font-size: 14px; }
+    .tableWrap th,
+    .tableWrap td { padding: 15px 16px; }
+    .tableWrap thead th { font-size: 12px; }
+    .group button { font-size: 14px; }
+    .task strong { font-size: 15px; }
+    .task small,
+    .meta,
+    .provider,
+    .attention { font-size: 11px; }
+}

@@ -66,6 +66,25 @@ test('starts a persistent named stream and emits parsed events', async () => {
   assert.equal(handle.sessionId, 'new-1');
 });
 
+test('resumes the exact Claude session and forwards attachment directory grants', () => {
+  let spawned;
+  function fakeSpawn(command, args, options) {
+    spawned = { command, args, options };
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    return child;
+  }
+  const provider = new ClaudeCodeProvider({ spawn: fakeSpawn });
+  provider.resumeSession('session-existing', 'Review @/tmp/reference/board.png', {
+    cwd: '/tmp/demo',
+    extraArgs: ['--add-dir', '/tmp/reference'],
+  });
+  assert.ok(spawned.args.includes('--resume'));
+  assert.equal(spawned.args[spawned.args.indexOf('--resume') + 1], 'session-existing');
+  assert.deepEqual(spawned.args.slice(-2), ['--add-dir', '/tmp/reference']);
+});
+
 test('does not pretend Claude supports destructive session operations', async () => {
   const provider = new ClaudeCodeProvider();
   assert.equal(provider.capabilities.archive, false);

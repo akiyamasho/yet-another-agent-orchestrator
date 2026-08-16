@@ -8,6 +8,7 @@ import { ActivityView } from "@/components/views/ActivityView";
 import { InspectorPanel } from "@/components/inspector/InspectorPanel";
 import { AgentDialogs, type AgentDialogMode } from "@/components/dialogs/AgentDialogs";
 import { CommandPalette } from "@/components/command/CommandPalette";
+import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { useConstellationStore } from "@/lib/store/useConstellationStore";
 import styles from "./AppShell.module.css";
 import type { AgentProvider } from "@/lib/types";
@@ -18,6 +19,7 @@ const views = [{ id: "map", label: "Map", icon: Map }, { id: "list", label: "Lis
 export function AppShell() {
   const [railOpen, setRailOpen] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [dialog, setDialog] = useState<{ mode: AgentDialogMode; folderId?: string; threadId?: string }>();
   const folders = useConstellationStore((s) => s.folders); const threads = useConstellationStore((s) => s.threads);
   const viewMode = useConstellationStore((s) => s.viewMode); const selectedFolderId = useConstellationStore((s) => s.selectedFolderId); const selectedThreadId = useConstellationStore((s) => s.selectedThreadId);
@@ -34,9 +36,12 @@ export function AppShell() {
       const params = new URLSearchParams(window.location.search);
       const demoView = params.get("demoView");
       if (demoView === "map" || demoView === "list" || demoView === "activity") setViewMode(demoView);
+      const demoFolder = params.get("demoFolder");
+      if (demoFolder) window.setTimeout(() => selectFolder(demoFolder), 60);
       const demoThread = params.get("demoThread");
       if (demoThread) window.setTimeout(() => selectThread(demoThread), 80);
       if (params.get("demoJump") === "1") window.setTimeout(() => setPaletteOpen(true), 100);
+      if (params.get("demoSettings") === "1") window.setTimeout(() => setSettingsOpen(true), 100);
       return;
     }
     let timer: number | undefined;
@@ -58,7 +63,7 @@ export function AppShell() {
         {folderList.map((folder) => { const folderThreads = activeThreads.filter((thread) => thread.folderId === folder.id); const count = folderThreads.length; const codexCount = folderThreads.filter((thread) => (thread.provider ?? "codex") === "codex").length; const claudeCount = folderThreads.filter((thread) => thread.provider === "claude").length; const needs = folderThreads.filter((thread) => (thread.attention || thread.status === "needs_attention")).length; return <button key={folder.id} className={`${styles.folderItem} ${selectedFolderId === folder.id ? styles.folderActive : ""}`} style={{ "--accent": folder.accent } as React.CSSProperties} onClick={() => selectFolder(folder.id)} aria-current={selectedFolderId === folder.id ? "page" : undefined} aria-label={`${folder.name}, ${count} active threads`}><span className={styles.folderIcon}><Folder size={16} /></span>{railOpen && <span className={styles.folderText}><strong>{folder.name}</strong><small>{folder.path}</small></span>}{railOpen && <span className={styles.counts}><b className={styles.codexCount}>C {codexCount}</b><b className={styles.claudeCount}>A {claudeCount}</b>{needs > 0 && <i>{needs}</i>}</span>}</button>; })}
       </nav>
       <button className={styles.addFolder} onClick={() => setDialog({ mode: "folder" })}><Plus size={16} />{railOpen && "Add folder"}</button>
-      <div className={styles.railBottom}><button className={styles.utility} aria-label="Settings"><Settings size={16} />{railOpen && "Settings"}</button><button className={styles.collapse} onClick={() => setRailOpen((open) => !open)} aria-label={railOpen ? "Collapse folder rail" : "Expand folder rail"}>{railOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}</button></div>
+      <div className={styles.railBottom}><button className={styles.utility} aria-label="Settings" onClick={() => setSettingsOpen(true)}><Settings size={16} />{railOpen && "Settings"}</button><button className={styles.collapse} onClick={() => setRailOpen((open) => !open)} aria-label={railOpen ? "Collapse folder rail" : "Expand folder rail"}>{railOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}</button></div>
     </aside>
     <section className={styles.workspace}>
       <header className={styles.commandBar}><div className={styles.breadcrumb}><span className={styles.crumbMuted}>Workspace</span><ChevronRight size={13} /><span className={styles.crumbAccent} style={{ color: selectedFolder?.accent }}>{contextLabel}</span>{selectedThread && <><ChevronRight size={13} /><span>{selectedThread.title}</span></>}</div>
@@ -68,6 +73,7 @@ export function AppShell() {
     </section>
     <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} onNewAgent={() => openAgent()} onAddFolder={() => setDialog({ mode: "folder" })} onShowAttention={() => { const first = attentionThreads[0]; if (first) selectThread(first.id); }} onFitOverview={() => { selectFolder(undefined); selectThread(undefined); setViewMode("map"); setQuery(""); }} />
     <AgentDialogs mode={dialog?.mode} folderId={dialog?.folderId} threadId={dialog?.threadId} onClose={closeDialog} onSaved={(id) => { if (dialog?.mode === "folder") selectFolder(id); else selectThread(id); }} />
+    <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
   </main>;
 }
 

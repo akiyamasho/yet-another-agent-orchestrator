@@ -2,18 +2,21 @@
     position: fixed;
     z-index: 20;
     inset: 0 0 0 auto;
-    width: min(460px, 100vw);
-    overflow: auto;
+    width: min(540px, 100vw);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     color: #e7edf8;
     background: rgba(12, 15, 34, 0.97);
     border-left: 1px solid rgba(148, 163, 184, 0.18);
     box-shadow: -20px 0 60px rgba(0, 0, 0, 0.3);
     font:
-        14px/1.45 system-ui,
+        15px/1.5 system-ui,
         sans-serif;
     --accent: #67e8f9;
 }
 .header {
+    flex: 0 0 auto;
     padding: 20px 22px 16px;
     border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
@@ -195,6 +198,7 @@
     color: #9eabc0;
 }
 .tabs {
+    flex: 0 0 auto;
     display: flex;
     padding: 0 22px;
     gap: 18px;
@@ -226,6 +230,9 @@
     background: var(--accent);
 }
 .body {
+    min-height: 0;
+    flex: 1;
+    overflow: auto;
     padding: 20px 22px 40px;
 }
 .card,
@@ -417,7 +424,7 @@
 .timeline time { color: var(--quiet); }
 .header h2 {
     font-family: "Barlow Condensed", sans-serif;
-    font-size: 32px;
+    font-size: 38px;
     font-weight: 600;
     letter-spacing: -0.01em;
     line-height: 1;
@@ -428,7 +435,7 @@
     padding-top: 10px;
     border-top: 1px solid rgba(226, 184, 75, 0.24);
     color: var(--muted) !important;
-    font: 400 10px/1.5 "IBM Plex Mono", monospace !important;
+    font: 400 11px/1.55 "IBM Plex Mono", monospace !important;
 }
 .transcript {
     display: grid;
@@ -464,7 +471,7 @@
     border-color: var(--line);
     background: var(--surface-raised);
     font-family: "IBM Plex Mono", monospace;
-    font-size: 9px;
+    font-size: 10px;
     letter-spacing: 0.07em;
     text-transform: uppercase;
 }
@@ -475,7 +482,7 @@
 .attention { border-radius: 0; border-color: rgba(226, 184, 75, 0.42); background: rgba(226, 184, 75, 0.07); }
 .attentionTitle { color: var(--gold); }
 .tabs { border-color: var(--line); }
-.tabs button { color: var(--quiet); font-size: 9px; text-transform: uppercase; }
+.tabs button { color: var(--quiet); font-size: 10px; text-transform: uppercase; }
 .tabs .activeTab { color: var(--text); }
 .activeTab::after { height: 1px; background: var(--projector); }
 .card,
@@ -489,8 +496,24 @@
 .link { color: var(--projector); }
 .sectionHeading h3 {
     font-family: "Barlow Condensed", sans-serif;
-    font-size: 20px;
+    font-size: 23px;
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
+}
+
+@media (min-width: 1800px) {
+    .panel { width: min(620px, 100vw); font-size: 16px; }
+    .header { padding: 26px 28px 20px; }
+    .context { font-size: 11px; }
+    .key, .meta { font-size: 13px; }
+    .header h2 { font-size: 46px; }
+    .tabs { padding-inline: 28px; gap: 24px; }
+    .tabs button { font-size: 12px; }
+    .body { padding: 24px 28px 48px; }
+    .card label, .details dt { font-size: 11px; }
+    .card .objective { font-size: 17px; }
+    .details dd, .timeline p { font-size: 14px; }
+    .child strong { font-size: 15px; }
+    .child small, .empty { font-size: 13px; }
 }
