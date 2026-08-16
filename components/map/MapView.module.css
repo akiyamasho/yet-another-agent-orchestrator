@@ -316,6 +316,10 @@
 .legendDot.attention {
     background: #fb7185;
 }
+.legendDot.recent {
+    background: #c4a7ff;
+    box-shadow: 0 0 7px rgba(196, 167, 255, 0.65);
+}
 .hints {
     position: absolute;
     z-index: 4;
@@ -363,6 +367,94 @@
     .hints {
         display: none;
     }
+}
+
+/* State must remain legible when the map is zoomed out: text is intentional, not color-only. */
+.folderLive .folderOrbit {
+    border-width: 2px;
+    border-color: color-mix(in srgb, var(--accent) 78%, #d9f2f4);
+    box-shadow: 0 0 42px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.folderLive .folderGlyph {
+    color: #d9f2f4;
+    background: radial-gradient(circle, color-mix(in srgb, var(--accent) 42%, transparent), transparent 72%);
+}
+.folderNeedsAttention .folderOrbit {
+    border-color: #fb7185;
+    box-shadow: 0 0 36px rgba(251, 113, 133, 0.28);
+}
+.folderStateSummary {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px 7px;
+    max-width: 190px;
+    font: 9px/1.15 "IBM Plex Mono", monospace;
+    letter-spacing: .03em;
+}
+.folderLiveCount { color: #83d6bd; }
+.folderRecentCount { color: #c4a7ff; }
+.folderAttentionCount { color: #fb7185; }
+.folderLiveCount::before,
+.folderRecentCount::before,
+.folderAttentionCount::before {
+    content: "";
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    margin: 0 4px 1px 0;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 6px currentColor;
+}
+.threadNode { position: relative; }
+.status_running {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--provider-color) 18%, #0a0f13), rgba(10, 15, 19, .94));
+    border: 1px solid color-mix(in srgb, var(--provider-color) 76%, #83d6bd);
+    box-shadow: 0 0 24px color-mix(in srgb, var(--provider-color) 23%, transparent), inset 0 0 18px color-mix(in srgb, var(--provider-color) 10%, transparent);
+}
+.status_needs_attention {
+    background: linear-gradient(90deg, rgba(96, 25, 41, .55), rgba(10, 15, 19, .94));
+    border: 1px solid #fb7185;
+    box-shadow: 0 0 22px rgba(251, 113, 133, .24), inset 0 0 16px rgba(251, 113, 133, .08);
+}
+.status_completed, .status_idle, .status_waiting, .status_failed { opacity: .82; }
+.statePill {
+    display: inline-flex;
+    align-items: center;
+    align-self: start;
+    width: fit-content;
+    max-width: 100%;
+    margin-top: 2px;
+    padding: 2px 5px;
+    border: 1px solid rgba(148, 163, 204, .34);
+    color: #aeb8d0;
+    background: rgba(4, 7, 10, .72);
+    font: 9px/1.1 "IBM Plex Mono", monospace;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.status_running .statePill { border-color: #83d6bd; color: #b9ffe5; background: rgba(19, 75, 65, .55); box-shadow: 0 0 9px rgba(131, 214, 189, .22); }
+.status_needs_attention .statePill { border-color: #fb7185; color: #ffd5dc; background: rgba(96, 25, 41, .76); }
+.recentExternal { border-left: 2px solid #c4a7ff; }
+.recentExternal .statePill { border-color: #c4a7ff; color: #e5dbff; background: rgba(72, 45, 119, .34); }
+.liveBeacon {
+    width: 6px;
+    height: 6px;
+    margin-right: 4px;
+    border-radius: 50%;
+    background: #83d6bd;
+    box-shadow: 0 0 8px #83d6bd;
+    animation: beacon 1.45s ease-in-out infinite;
+}
+.liveEdge :global(.react-flow__edge-path) { filter: drop-shadow(0 0 7px rgba(131, 214, 189, .9)); }
+.recentEdge :global(.react-flow__edge-path) { filter: drop-shadow(0 0 3px rgba(196, 167, 255, .55)); }
+@keyframes beacon { 50% { opacity: .42; transform: scale(.72); } }
+@media (prefers-reduced-motion: reduce) {
+    .liveBeacon,
+    .canvas :global(.react-flow__edge.animated) .react-flow__edge-path { animation: none; }
 }
 
 /* Director-portfolio theme: cinematic charcoal, editorial type and restrained light. */
@@ -567,4 +659,64 @@
     .threadCopy strong { font-size: 15px; }
     .threadNode small { font-size: 11px; }
     .legend, .hints { font-size: 12px; }
+}
+
+/* Final state pass: these follow the radial theme so live treatment cannot be reset by its transparent node defaults. */
+.folderNode.folderLive {
+    min-height: 178px;
+}
+.folderNode {
+    width: 290px;
+}
+.folderNode strong {
+    max-width: 280px;
+}
+.folderNode .folderStateSummary {
+    max-width: 280px;
+}
+.folderNode .folderOrbit {
+    top: 8px;
+    width: 78px;
+    height: 78px;
+}
+.folderNode .folderOrbit::after {
+    inset: 7px;
+}
+.folderNode.folderLive .folderOrbit {
+    border-width: 2px;
+    border-color: color-mix(in srgb, var(--accent) 82%, #d9f2f4);
+    box-shadow: 0 0 48px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.folderNode.folderNeedsAttention .folderOrbit {
+    border-color: #fb7185;
+    box-shadow: 0 0 42px rgba(251, 113, 133, .32);
+}
+.threadNode.status_running,
+.threadNode.status_running:hover {
+    border: 1px solid color-mix(in srgb, var(--provider-color) 78%, #83d6bd);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--provider-color) 22%, #0a0f13), rgba(10, 15, 19, .96));
+    box-shadow: 0 0 28px color-mix(in srgb, var(--provider-color) 30%, transparent), inset 0 0 18px color-mix(in srgb, var(--provider-color) 12%, transparent);
+}
+.threadNode.status_needs_attention,
+.threadNode.status_needs_attention:hover {
+    border: 1px solid #fb7185;
+    background: linear-gradient(90deg, rgba(96, 25, 41, .62), rgba(10, 15, 19, .96));
+    box-shadow: 0 0 25px rgba(251, 113, 133, .3), inset 0 0 16px rgba(251, 113, 133, .1);
+}
+.threadNode.recentExternal,
+.threadNode.recentExternal:hover {
+    border-left: 2px solid #c4a7ff;
+    background: linear-gradient(90deg, rgba(72, 45, 119, .22), rgba(10, 15, 19, .94));
+}
+.threadNode.status_running .statePill { border-color: #83d6bd; color: #b9ffe5; background: rgba(19, 75, 65, .62); }
+.threadNode.status_needs_attention .statePill { border-color: #fb7185; color: #ffd5dc; background: rgba(96, 25, 41, .82); }
+.threadNode.recentExternal .statePill { border-color: #c4a7ff; color: #e5dbff; background: rgba(72, 45, 119, .42); }
+.liveEdge :global(.react-flow__edge-path) { filter: drop-shadow(0 0 8px rgba(131, 214, 189, .95)); }
+.recentEdge :global(.react-flow__edge-path) { filter: drop-shadow(0 0 4px rgba(196, 167, 255, .62)); }
+@media (prefers-reduced-motion: reduce) {
+    .liveBeacon,
+    .canvas :global(.react-flow__edge.animated) .react-flow__edge-path { animation: none !important; }
+}
+@media (max-width: 1700px) {
+    .hints { display: none; }
 }

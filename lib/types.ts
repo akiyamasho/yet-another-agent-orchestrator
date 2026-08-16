@@ -1,7 +1,7 @@
 export type ThreadStatus = "running" | "waiting" | "needs_attention" | "completed" | "failed" | "idle";
 export type PermissionMode = "read-only" | "workspace-write" | "full-access";
 export type EventType = "message" | "tool" | "file" | "approval" | "error" | "status";
-export type ViewMode = "map" | "list" | "activity";
+export type ViewMode = "map" | "list" | "activity" | "now";
 export type AttentionKind = "approval" | "input" | "error";
 export type AgentProvider = "codex" | "claude";
 
@@ -9,7 +9,9 @@ export interface FolderContext { id: string; name: string; path: string; accent:
 export interface AgentThread {
   id: string; key: string; folderId: string; parentId?: string; title: string; objective: string; summary: string;
   profile: string; status: ThreadStatus; model: string; reasoningEffort: string; permission: PermissionMode;
-  branch?: string; startedAt?: string; finishedAt?: string; archived?: boolean;
+  branch?: string; startedAt?: string; updatedAt?: string; finishedAt?: string; archived?: boolean;
+  /** True when a provider's recent external activity is inferred, not live-reported. */
+  recentlyActiveExternally?: boolean;
   /** The runtime that owns this task. Optional for backwards-compatible local/demo records. */
   provider?: AgentProvider;
   attention?: { kind: AttentionKind; message: string };

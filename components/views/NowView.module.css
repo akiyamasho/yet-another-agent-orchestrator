@@ -1,0 +1,328 @@
+.view {
+    padding: clamp(20px, 4vw, 48px);
+    max-width: 1080px;
+    margin: 0 auto;
+    color: var(--text);
+    font-family: "IBM Plex Sans", sans-serif;
+}
+.heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 30px;
+}
+.kicker {
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--gold);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    margin: 0 0 8px;
+}
+.heading h2 {
+    margin: 0;
+    font-size: clamp(30px, 4vw, 48px);
+    letter-spacing: -0.05em;
+}
+.subtle {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 9px 0 0;
+    max-width: 610px;
+}
+.totals {
+    display: grid;
+    gap: 2px;
+    text-align: right;
+    color: var(--muted);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+.totals strong {
+    color: var(--text);
+    font-size: 28px;
+    line-height: 1;
+}
+.section {
+    border: 1px solid var(--line);
+    border-radius: 0;
+    background: var(--panel);
+    padding: 18px;
+    margin-bottom: 20px;
+}
+.sectionHead {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+}
+.sectionHead h3 {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin: 0;
+    font-size: 17px;
+}
+.sectionHead p {
+    margin: 5px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+.sectionHead > span {
+    color: var(--quiet);
+    font-size: 12px;
+}
+.liveDot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--projector);
+    box-shadow: 0 0 15px var(--projector);
+}
+.project {
+    border-top: 1px solid var(--line);
+    padding: 17px 0 3px;
+}
+.project:first-child {
+    border-top: 0;
+    padding-top: 0;
+}
+.projectHeader {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 12px;
+}
+.projectMark {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    box-shadow: 0 0 12px color-mix(in srgb, currentColor 40%, transparent);
+}
+.projectHeader h4 {
+    margin: 0;
+    font-size: 14px;
+}
+.projectCount,
+.providerCount {
+    color: var(--quiet);
+    font-size: 11px;
+    margin-left: auto;
+}
+.providerGroup {
+    margin: 0 0 12px 17px;
+}
+.providerGroup h5 {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 0 7px;
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+.providerBadge {
+    border: 1px solid;
+    border-radius: 4px;
+    padding: 2px 4px;
+    font-size: 9px;
+    letter-spacing: 0;
+}
+.providerCount {
+    margin-left: 0;
+}
+.cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 8px;
+}
+.card {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--provider);
+    border-radius: 0;
+    background: var(--surface);
+    min-width: 0;
+}
+.card.selected {
+    outline: 2px solid color-mix(in srgb, var(--provider) 60%, transparent);
+    outline-offset: 1px;
+}
+.cardMain {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    text-align: left;
+    padding: 12px 9px 12px 12px;
+    cursor: pointer;
+}
+.cardMain:hover,
+.cardMain:focus-visible {
+    background: rgba(255, 255, 255, 0.045);
+}
+.status {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+    font-size: 11px;
+    color: var(--muted);
+    padding-top: 2px;
+}
+.status svg {
+    width: 13px;
+    height: 13px;
+}
+.status_running {
+    color: var(--projector);
+}
+
+.externalBadge {
+    border: 1px solid var(--line-strong);
+    border-radius: 0;
+    color: var(--quiet);
+    font-size: 9px;
+    letter-spacing: 0.02em;
+    padding: 2px 5px;
+    white-space: nowrap;
+}
+.status_needs_attention,
+.status_failed {
+    color: var(--gold);
+}
+.status_completed {
+    color: var(--projector);
+}
+.cardBody {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+.cardBody strong {
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.summary {
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.context {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--quiet);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.context svg {
+    width: 11px;
+    height: 11px;
+    flex: none;
+}
+.time {
+    color: var(--quiet);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    white-space: nowrap;
+    padding-top: 2px;
+}
+.locate {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    border: 0;
+    border-left: 1px solid var(--line);
+    background: transparent;
+    color: var(--projector);
+    font-family: "IBM Plex Mono", monospace;
+    text-transform: uppercase;
+    font-size: 10px;
+    padding: 9px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.locate:hover:not(:disabled),
+.locate:focus-visible:not(:disabled) {
+    background: var(--surface);
+    color: var(--text);
+}
+.locate:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.locate svg {
+    width: 13px;
+    height: 13px;
+}
+.empty {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 25px 12px;
+    color: var(--muted);
+}
+.empty > svg {
+    width: 21px;
+    height: 21px;
+}
+.empty p {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+}
+.empty strong {
+    color: var(--text);
+    font-size: 13px;
+}
+.empty span {
+    font-size: 12px;
+}
+@media (max-width: 620px) {
+    .heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+    .totals {
+        text-align: left;
+    }
+    .section {
+        padding: 13px;
+    }
+    .providerGroup {
+        margin-left: 8px;
+    }
+    .cards {
+        grid-template-columns: 1fr;
+    }
+    .cardMain {
+        padding-left: 9px;
+    }
+    .locate span {
+        display: none;
+    }
+    .locate {
+        padding: 9px 8px;
+    }
+    .time {
+        font-size: 9px;
+    }
+}

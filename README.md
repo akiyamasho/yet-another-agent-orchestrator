@@ -4,10 +4,12 @@
 
 No local web server is needed after installation.
 
-![Synthetic demo of the spatial project map](docs/screenshots/constellation-demo-map.png)
+![Synthetic demo of the Now workspace with running and recently active agents](docs/screenshots/constellation-demo-now.png)
 
 <details>
 <summary>More screenshots — synthetic demo data only</summary>
+
+![Synthetic demo of the spatial project map with LIVE and Needs you states](docs/screenshots/constellation-demo-map.png)
 
 ![Provider-aware task list using synthetic data](docs/screenshots/constellation-demo-list.png)
 
@@ -43,6 +45,14 @@ Codex uses the supported App Server protocol and never parses private Codex stor
 Codex App Server live state is scoped to the client process that owns a task. Constellation shows exact running/tool-stream state for tasks it starts or continues. For a task running in another Codex window, it syncs the persisted conversation through App Server and labels the runtime as external instead of claiming a false idle state; it never scrapes Codex's private logs to imitate the other client's event stream.
 
 Claude Code also has no supported single-session destructive-delete API. Its title, archive, and “Remove from Constellation” actions are explicit app-local overlays; the underlying Claude transcript remains untouched and resumable. Browser development mode uses clearly marked synthetic fixtures. Packaged Electron mode never silently swaps real provider data for dummy data.
+
+## Now workspace
+
+**Now** is a single operational list of agents that are running now and agents that were most recently active and are likely to be resumed. It groups entries by project, with explicit Codex and Claude Code subgroups, and supports selected-folder and search/query filtering. Selecting an entry opens its inspector in place; **Show in constellation** locates the exact node, and **Back to Now** returns to the same list with the task still selected.
+
+Now reports only provider-backed running state. Recency is derived in order from the provider-reported `updatedAt`, task events, and then finish/start timestamps; it does not invent live status from fixtures or private logs. Fresh activity inferred from provider timestamps is labeled **Recent external**, never promoted to confirmed running. Codex activity from another client remains labeled as externally synced because App Server does not expose that client’s in-memory runtime signal.
+
+The constellation map uses the same distinction: provider-reported running nodes and folders receive unmistakable text **LIVE** treatment and live counts, while **Needs you** state is equally explicit in text and counts. Recent external activity is visibly labeled **Recent external** and is never represented as a live pulse or confirmed-running count.
 
 ## Install the macOS app
 

@@ -16,6 +16,11 @@ function date(value: unknown) {
   if (typeof value === "number") return new Date(value < 10_000_000_000 ? value * 1000 : value).toISOString();
   return typeof value === "string" && value ? value : undefined;
 }
+function validRecentTimestamp(value: string | undefined) {
+  if (!value) return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && Math.abs(Date.now() - timestamp) <= 90_000;
+}
 function hash(value: string) {
   let result = 2166136261;
   for (let i = 0; i < value.length; i += 1) { result ^= value.charCodeAt(i); result = Math.imul(result, 16777619); }
@@ -94,11 +99,15 @@ function mapSnapshot(snapshot: ProviderSnapshot): NormalizedState {
     const stateId = providerThreadId(provider, id);
     const flags = activeFlags(record.status);
     const status = flags.includes("waitingOnApproval") || flags.includes("waitingOnUserInput") ? "needs_attention" : statusOf(record.status, Boolean(record.archived));
+    const updatedAt = date(record.updatedAt ?? record.updated_at);
+    const rawStatus = typeof record.status === "string" ? record.status.toLowerCase() : record.status && typeof record.status === "object" ? text((record.status as Record<string, unknown>).type || (record.status as Record<string, unknown>).status || (record.status as Record<string, unknown>).state).toLowerCase() : "";
+    const externalActivityHint = provider === "codex" ? /not[ _-]?loaded|unloaded/.test(rawStatus) : !rawStatus || /idle|unknown/.test(rawStatus);
+    const recentlyActiveExternally = status !== "running" && status !== "needs_attention" && externalActivityHint && validRecentTimestamp(updatedAt);
     const rawParent = parentRaw(provider, record);
     const parentId = rawParent && rawIds.has(rawParent) ? providerThreadId(provider, rawParent) : undefined;
     const title = titleOf(provider, record, id);
     const codex = record as CodexRawThread;
-    state.threads[stateId] = { id: stateId, key: id.slice(0, 8).toUpperCase(), folderId: folderId(cwd), parentId, title, objective: text(record.objective) || text(record.prompt) || text(record.summary) || text(codex.preview).slice(0, 420) || title, summary: text(record.summary) || text(codex.preview).slice(0, 220) || `${status.replace("_", " ")} · ${providerMeta(provider).label}`, profile: provider === "codex" ? (text(codexSpawn(codex)?.agent_role) || "codex-agent") : ((record as ClaudeRawSession).isSidechain ? "claude-subagent" : "claude-agent"), status, model: text(record.model) || providerMeta(provider).label, reasoningEffort: text(codex.reasoningEffort) || text(codex.reasoning_effort) || "default", permission: permission(record.permissionMode || record.permission), branch: text(record.branch) || text((codex.gitInfo as Record<string, unknown> | undefined)?.branch) || undefined, startedAt: date(record.startedAt ?? record.createdAt ?? record.created_at), finishedAt: date(record.finishedAt ?? record.updatedAt ?? record.updated_at), archived: Boolean(record.archived), provider, attention: status === "needs_attention" ? { kind: "input", message: `${providerMeta(provider).label} is waiting for attention.` } : undefined };
+    state.threads[stateId] = { id: stateId, key: id.slice(0, 8).toUpperCase(), folderId: folderId(cwd), parentId, title, objective: text(record.objective) || text(record.prompt) || text(record.summary) || text(codex.preview).slice(0, 420) || title, summary: text(record.summary) || text(codex.preview).slice(0, 220) || `${status.replace("_", " ")} · ${providerMeta(provider).label}`, profile: provider === "codex" ? (text(codexSpawn(codex)?.agent_role) || "codex-agent") : ((record as ClaudeRawSession).isSidechain ? "claude-subagent" : "claude-agent"), status, model: text(record.model) || providerMeta(provider).label, reasoningEffort: text(codex.reasoningEffort) || text(codex.reasoning_effort) || "default", permission: permission(record.permissionMode || record.permission), branch: text(record.branch) || text((codex.gitInfo as Record<string, unknown> | undefined)?.branch) || undefined, startedAt: date(record.startedAt ?? record.createdAt ?? record.created_at), updatedAt, finishedAt: date(record.finishedAt), archived: Boolean(record.archived), provider, recentlyActiveExternally, attention: status === "needs_attention" ? { kind: "input", message: `${providerMeta(provider).label} is waiting for attention.` } : undefined };
   });
   (snapshot.events || []).forEach((event, index) => {
     const rawThread = text(event.threadId) || text(event.thread_id); const id = rawThread ? providerThreadId(provider, rawThread) : "";

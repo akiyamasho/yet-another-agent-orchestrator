@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Activity, Bell, ChevronLeft, ChevronRight, Command, Folder, LayoutList, Map, Plus, RefreshCw, Settings, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Activity, Bell, ChevronLeft, ChevronRight, Command, Folder, LayoutList, Map, Plus, Radio, RefreshCw, Settings, Sparkles } from "lucide-react";
 import { MapView } from "@/components/map/MapView";
 import { ListView } from "@/components/views/ListView";
 import { ActivityView } from "@/components/views/ActivityView";
+import { NowView } from "@/components/views/NowView";
 import { InspectorPanel } from "@/components/inspector/InspectorPanel";
 import { AgentDialogs, type AgentDialogMode } from "@/components/dialogs/AgentDialogs";
 import { CommandPalette } from "@/components/command/CommandPalette";
@@ -14,12 +15,13 @@ import styles from "./AppShell.module.css";
 import type { AgentProvider } from "@/lib/types";
 import type { ConnectionStatus } from "@/lib/store/useConstellationStore";
 
-const views = [{ id: "map", label: "Map", icon: Map }, { id: "list", label: "List", icon: LayoutList }, { id: "activity", label: "Activity", icon: Activity }] as const;
+const views = [{ id: "now", label: "Now", icon: Radio }, { id: "map", label: "Map", icon: Map }, { id: "list", label: "List", icon: LayoutList }, { id: "activity", label: "Activity", icon: Activity }] as const;
 
 export function AppShell() {
   const [railOpen, setRailOpen] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const nowFolderScope = useRef<string | undefined>(undefined);
   const [dialog, setDialog] = useState<{ mode: AgentDialogMode; folderId?: string; threadId?: string }>();
   const folders = useConstellationStore((s) => s.folders); const threads = useConstellationStore((s) => s.threads);
   const viewMode = useConstellationStore((s) => s.viewMode); const selectedFolderId = useConstellationStore((s) => s.selectedFolderId); const selectedThreadId = useConstellationStore((s) => s.selectedThreadId);
@@ -29,13 +31,15 @@ export function AppShell() {
   const folderList = useMemo(() => Object.values(folders), [folders]); const activeThreads = useMemo(() => Object.values(threads).filter((thread) => !thread.archived), [threads]);
   const attentionThreads = activeThreads.filter((thread) => thread.status === "needs_attention" || thread.attention); const selectedFolder = selectedFolderId ? folders[selectedFolderId] : undefined; const selectedThread = selectedThreadId ? threads[selectedThreadId] : undefined;
   const contextLabel = selectedFolder?.name ?? "All folders"; const closeDialog = () => setDialog(undefined); const openAgent = (folderId = selectedFolderId ?? folderList[0]?.id) => folderId ? setDialog({ mode: "agent", folderId }) : setDialog({ mode: "folder" });
+  const locateThread = (id: string, fromNow = false) => { const target = threads[id]; if (fromNow) nowFolderScope.current = selectedFolderId; if (target) selectFolder(target.folderId); selectThread(id); setViewMode("map"); };
+  const backToNow = () => { const threadToRestore = selectedThreadId; selectFolder(nowFolderScope.current); if (threadToRestore && threads[threadToRestore]) selectThread(threadToRestore); setViewMode("now"); };
   useEffect(() => {
     void syncFromSource();
     const desktop = window.constellationDesktop;
     if (!desktop) {
       const params = new URLSearchParams(window.location.search);
       const demoView = params.get("demoView");
-      if (demoView === "map" || demoView === "list" || demoView === "activity") setViewMode(demoView);
+      if (demoView === "now" || demoView === "map" || demoView === "list" || demoView === "activity") setViewMode(demoView);
       const demoFolder = params.get("demoFolder");
       if (demoFolder) window.setTimeout(() => selectFolder(demoFolder), 60);
       const demoThread = params.get("demoThread");
@@ -53,7 +57,7 @@ export function AppShell() {
     const poll = window.setInterval(() => void syncFromSource(), 30_000);
     return () => { window.clearTimeout(timer); window.clearInterval(poll); removeNotification(); removeClaudeNotification(); removeConnection(); removeClaudeConnection(); };
   }, [providerConnections.claude, providerConnections.codex, selectThread, setConnection, setProviderConnection, setViewMode, syncFromSource]);
-  const normalView = viewMode === "list" ? <ListView onNewAgent={() => openAgent()} /> : viewMode === "activity" ? <ActivityView onLocate={(id) => { setViewMode("map"); selectThread(id); }} /> : <MapView />;
+  const normalView = viewMode === "now" ? <NowView onOpen={(id) => { selectThread(id); setViewMode("now"); }} onLocate={(id) => locateThread(id, true)} /> : viewMode === "list" ? <ListView onNewAgent={() => openAgent()} /> : viewMode === "activity" ? <ActivityView onLocate={locateThread} /> : <MapView />;
   const view = connectionStatus === "loading" && !folderList.length ? <EmptyState title="Reading agent history" detail="Discovering your local Codex and Claude Code projects, chats, and agent trees…" spinning /> : connectionStatus === "offline" && !folderList.length ? <EmptyState title="Agent runtimes are not connected" detail={connectionError ?? "Constellation could not read Codex or Claude Code."} onRetry={() => void syncFromSource()} /> : !folderList.length ? <EmptyState title="No local projects yet" detail="Add a folder, then start a real Codex or Claude Code task in that project." onAdd={() => setDialog({ mode: "folder" })} /> : normalView;
   return <main className={`${styles.shell} ${railOpen ? styles.railExpanded : styles.railCollapsed}`} aria-label="Constellation workspace">
     <aside className={styles.rail} aria-label="Folder navigation">
@@ -69,7 +73,7 @@ export function AppShell() {
       <header className={styles.commandBar}><div className={styles.breadcrumb}><span className={styles.crumbMuted}>Workspace</span><ChevronRight size={13} /><span className={styles.crumbAccent} style={{ color: selectedFolder?.accent }}>{contextLabel}</span>{selectedThread && <><ChevronRight size={13} /><span>{selectedThread.title}</span></>}</div>
         <div className={styles.toolbar}><ProviderBadge provider="codex" status={providerConnections.codex} error={connectionError} count={activeThreads.filter((thread) => (thread.provider ?? "codex") === "codex").length} /><ProviderBadge provider="claude" status={providerConnections.claude} count={activeThreads.filter((thread) => thread.provider === "claude").length} /><div className={styles.segmented} role="tablist" aria-label="Workspace view">{views.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setViewMode(id)} className={viewMode === id ? styles.segmentActive : ""} role="tab" aria-selected={viewMode === id}><Icon size={14} />{label}</button>)}</div><button className={styles.searchTrigger} onClick={() => setPaletteOpen(true)} title="Jump to any project or task"><Command size={14} /><span>Jump</span><kbd>⌘⇧O</kbd></button><button className={styles.newAgent} onClick={() => openAgent()}><Plus size={15} />New agent</button><button className={styles.attentionButton} onClick={() => { const first = attentionThreads[0]; if (first) selectThread(first.id); }} aria-label={`${attentionThreads.length} items need attention`}><Bell size={17} />{attentionThreads.length > 0 && <span>{attentionThreads.length}</span>}</button></div></header>
       <div className={styles.content}>{view}</div>
-      {selectedThreadId && <InspectorPanel threadId={selectedThreadId} onClose={() => selectThread(undefined)} onAddSubagent={(id) => setDialog({ mode: "subagent", threadId: id })} onEdit={(id) => setDialog({ mode: "edit", threadId: id })} onArchive={(id) => setDialog({ mode: "archive", threadId: id })} onDelete={(id) => setDialog({ mode: "delete", threadId: id })} />}
+      {selectedThreadId && <InspectorPanel threadId={selectedThreadId} isMapView={viewMode === "map"} onBackToNow={backToNow} onClose={() => selectThread(undefined)} onAddSubagent={(id) => setDialog({ mode: "subagent", threadId: id })} onEdit={(id) => setDialog({ mode: "edit", threadId: id })} onArchive={(id) => setDialog({ mode: "archive", threadId: id })} onDelete={(id) => setDialog({ mode: "delete", threadId: id })} />}
     </section>
     <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} onNewAgent={() => openAgent()} onAddFolder={() => setDialog({ mode: "folder" })} onShowAttention={() => { const first = attentionThreads[0]; if (first) selectThread(first.id); }} onFitOverview={() => { selectFolder(undefined); selectThread(undefined); setViewMode("map"); setQuery(""); }} />
     <AgentDialogs mode={dialog?.mode} folderId={dialog?.folderId} threadId={dialog?.threadId} onClose={closeDialog} onSaved={(id) => { if (dialog?.mode === "folder") selectFolder(id); else selectThread(id); }} />

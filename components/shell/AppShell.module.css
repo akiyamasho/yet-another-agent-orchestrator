@@ -547,6 +547,18 @@
 .searchTrigger,
 .newAgent { font-size: 10px; }
 
+/* Keep the expanded folder rail from squeezing the workspace controls at
+   common laptop widths while retaining all four labeled view tabs. */
+@media (max-width: 1280px) and (min-width: 901px) {
+    .toolbar { gap: 5px; }
+    .connection { display: none; }
+    .segmented button { padding-inline: 7px; }
+    .searchTrigger { padding-inline: 8px; }
+    .searchTrigger span { display: none; }
+    .newAgent { padding-inline: 8px; font-size: 0; }
+    .newAgent svg { margin: 0; }
+}
+
 @media (min-width: 1800px) {
     .shell { --rail-width: 318px; }
     .rail { padding-left: 18px; padding-right: 18px; }

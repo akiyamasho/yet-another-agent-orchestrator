@@ -18,7 +18,7 @@ import { useConstellationStore } from "@/lib/store/useConstellationStore";
 import type { AgentThread, FolderContext, ThreadStatus } from "@/lib/types";
 import styles from "./MapView.module.css";
 
-type FolderNodeData = { folder: FolderContext; count: number; attention: number; onSelect: () => void };
+type FolderNodeData = { folder: FolderContext; count: number; live: number; recent: number; attention: number; onSelect: () => void };
 type ThreadNodeData = { thread: AgentThread; folder: FolderContext; depth: number; dimmed: boolean; onSelect: () => void };
 type WorkspaceNodeData = { folderCount: number; threadCount: number };
 type MapNode = Node<FolderNodeData | ThreadNodeData | WorkspaceNodeData>;
@@ -52,16 +52,20 @@ function ConstellationHandles({ target = true, source = true }: { target?: boole
 }
 
 function FolderNode({ data }: NodeProps<MapNode>) {
-  const { folder, count, attention, onSelect } = data as FolderNodeData;
+  const { folder, count, live, recent, attention, onSelect } = data as FolderNodeData;
   const folderThreads = Object.values(useConstellationStore.getState().threads).filter((thread) => !thread.archived && thread.folderId === folder.id);
   const codexCount = folderThreads.filter((thread) => (thread.provider ?? "codex") === "codex").length;
   const claudeCount = folderThreads.filter((thread) => thread.provider === "claude").length;
-  return <button className={styles.folderNode} style={{ "--accent": folder.accent } as React.CSSProperties} onClick={onSelect} aria-label={`Focus ${folder.name} folder, ${codexCount} Codex and ${claudeCount} Claude Code tasks`}>
+  const liveLabel = `${live} live`;
+  const recentLabel = `${recent} recent`;
+  const attentionLabel = `${attention} needs you`;
+  return <button className={`${styles.folderNode} ${live ? styles.folderLive : ""} ${attention ? styles.folderNeedsAttention : ""}`} style={{ "--accent": folder.accent } as React.CSSProperties} onClick={onSelect} aria-label={`Focus ${folder.name} folder, ${codexCount} Codex and ${claudeCount} Claude Code tasks, ${liveLabel}, ${recentLabel}, ${attentionLabel}`}>
     <ConstellationHandles/>
     <span className={styles.folderOrbit} />
     <span className={styles.folderGlyph}><Sparkles size={20} /></span>
     <strong>{folder.name}</strong>
-    <small>{count} {count === 1 ? "thread" : "threads"}{attention ? ` · ${attention} needs you` : ""}</small>
+    <small>{count} {count === 1 ? "thread" : "threads"}</small>
+    <span className={styles.folderStateSummary} aria-label={`${liveLabel}, ${recentLabel}, ${attentionLabel}`}><span className={styles.folderLiveCount}>{liveLabel}</span><span className={styles.folderRecentCount}>{recentLabel}</span><span className={styles.folderAttentionCount}>{attentionLabel}</span></span>
     <span className={styles.providerCounts}><span className={styles.codexMark}>C {codexCount}</span><span className={styles.claudeMark}>A {claudeCount}</span></span>
   </button>;
 }
@@ -77,11 +81,13 @@ function WorkspaceNode({ data }: NodeProps<MapNode>) {
 function ThreadNode({ data }: NodeProps<MapNode>) {
   const { thread, folder, depth, dimmed, onSelect } = data as ThreadNodeData;
   const provider = getProvider(thread);
-  return <button data-depth={Math.min(depth, 2)} className={`${styles.threadNode} ${styles[`status_${thread.status}`]} ${dimmed ? styles.dimmed : ""}`} style={{ "--accent": folder.accent, "--provider-color": provider.color, "--depth": depth } as React.CSSProperties} onClick={onSelect} aria-label={`${thread.key}: ${thread.title}, ${provider.label}, ${statusLabel[thread.status]}`}>
+  const isRecentExternal = Boolean(thread.recentlyActiveExternally && thread.status !== "running" && thread.status !== "needs_attention");
+  const stateLabel = thread.status === "running" ? "LIVE" : thread.status === "needs_attention" ? "Needs you" : isRecentExternal ? "Recent external" : statusLabel[thread.status];
+  return <button data-depth={Math.min(depth, 2)} className={`${styles.threadNode} ${styles[`status_${thread.status}`]} ${isRecentExternal ? styles.recentExternal : ""} ${dimmed ? styles.dimmed : ""}`} style={{ "--accent": folder.accent, "--provider-color": provider.color, "--depth": depth } as React.CSSProperties} onClick={onSelect} aria-label={`${thread.key}: ${thread.title}, ${provider.label}, ${stateLabel}`}>
     <ConstellationHandles/>
     <span className={styles.statusRing}><StatusGlyph status={thread.status} /></span>
     <span className={styles.providerBadge} style={{ color: provider.color, borderColor: provider.color }} title={provider.label}>{provider.short}</span>
-    <span className={styles.threadCopy}><strong>{thread.title}</strong><small>{thread.key} · {provider.label} · {statusLabel[thread.status]}</small></span>
+    <span className={styles.threadCopy}><strong>{thread.title}</strong><small>{thread.key} · {provider.label} · {statusLabel[thread.status]}</small><span className={styles.statePill}>{thread.status === "running" && <span className={styles.liveBeacon} aria-hidden="true" />}{stateLabel}</span></span>
     {thread.attention && <span className={styles.attentionBadge} aria-label="Attention required">!</span>}
   </button>;
 }
@@ -139,7 +145,10 @@ function MapCanvas() {
       const fy = selectedFolderId ? -76 : Math.sin(angle) * orbitRadius - 76;
       const folderThreads = visibleThreads.filter((thread) => thread.folderId === folder.id);
       const roots = folderThreads.filter((thread) => !thread.parentId);
-      result.push({ id: `folder:${folder.id}`, type: "folder", position: { x: fx, y: fy }, data: { folder, count: folderThreads.length, attention: folderThreads.filter((thread) => thread.status === "needs_attention").length, onSelect: () => { selectFolder(folder.id); selectThread(undefined); } } });
+      const live = folderThreads.filter((thread) => thread.status === "running").length;
+      const recent = folderThreads.filter((thread) => thread.recentlyActiveExternally && thread.status !== "running" && thread.status !== "needs_attention").length;
+      const attention = folderThreads.filter((thread) => thread.status === "needs_attention").length;
+      result.push({ id: `folder:${folder.id}`, type: "folder", position: { x: fx, y: fy }, data: { folder, count: folderThreads.length, live, recent, attention, onSelect: () => { selectFolder(folder.id); selectThread(undefined); } } });
       if (!selectedFolderId) return;
       const byId = new Map(folderThreads.map((thread) => [thread.id, thread]));
       let selectedRootId = selectedThreadId;
@@ -188,7 +197,9 @@ function MapCanvas() {
       if (!nodes.some((node) => node.id === source) || !nodes.some((node) => node.id === thread.id)) return;
       const providerColor = getProvider(thread).color;
       const related = !selectedThreadId || relatedThreadIds.has(thread.id) || Boolean(thread.parentId && relatedThreadIds.has(thread.parentId));
-      result.push({ id: `edge:${source}:${thread.id}`, source, target: thread.id, ...radialHandles(source, thread.id), type: "straight", animated: thread.status === "running", style: { stroke: thread.parentId ? providerColor : (folders.find((folder) => folder.id === thread.folderId)?.accent || providerColor), strokeWidth: thread.parentId ? 1.2 : 1.45, strokeDasharray: thread.parentId ? "3 7" : undefined, opacity: related ? 0.64 : 0.1 } });
+      const isLive = thread.status === "running";
+      const isRecent = Boolean(thread.recentlyActiveExternally && !isLive && thread.status !== "needs_attention");
+      result.push({ id: `edge:${source}:${thread.id}`, source, target: thread.id, ...radialHandles(source, thread.id), type: "straight", animated: isLive, className: isLive ? styles.liveEdge : isRecent ? styles.recentEdge : undefined, style: { stroke: thread.parentId ? providerColor : (folders.find((folder) => folder.id === thread.folderId)?.accent || providerColor), strokeWidth: isLive ? 2.4 : thread.parentId ? 1.2 : 1.45, strokeDasharray: isRecent ? "1 7" : thread.parentId ? "3 7" : undefined, opacity: related ? (isLive ? 0.94 : isRecent ? 0.7 : 0.64) : 0.1 } });
     });
     return result;
   }, [visibleThreads, nodes, folders, selectedThreadId, selectedFolderId, relatedThreadIds]);
@@ -213,7 +224,7 @@ function MapCanvas() {
       <Background color="#25314b" gap={48} size={1} />
       <Controls showInteractive={false} position="bottom-left" />
     </ReactFlow>
-    <div className={styles.legend} aria-label="Map legend"><span><i className={styles.legendLine} /> delegation</span><span><i className={`${styles.legendDot} ${styles.running}`} /> running</span><span><i className={`${styles.legendDot} ${styles.attention}`} /> needs you</span></div>
+    <div className={styles.legend} aria-label="Map legend"><span><i className={styles.legendLine} /> delegation</span><span><i className={`${styles.legendDot} ${styles.running}`} /> LIVE</span><span><i className={`${styles.legendDot} ${styles.recent}`} /> recent external</span><span><i className={`${styles.legendDot} ${styles.attention}`} /> needs you</span></div>
     <div className={styles.hints}>Esc close / move up&nbsp;&nbsp; · &nbsp;&nbsp;F focus selection&nbsp;&nbsp; · &nbsp;&nbsp;⇧1 overview</div>
   </div>;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, CircleAlert, Clock3, Pause, Play, Square, X } from "lucide-react";
+import { ChevronRight, CircleAlert, Clock3, Pause, Play, RotateCcw, Square, X } from "lucide-react";
 import { AgentChatTimeline, type ChatTimeline } from "@/components/chat/AgentChatTimeline";
 import { ThreadComposer } from "@/components/inspector/ThreadComposer";
 import { providerMeta, splitProviderThreadId } from "@/lib/providers";
@@ -13,9 +13,9 @@ type InspectorTab = "overview" | "subagents" | "activity" | "chat";
 const statusLabel: Record<ThreadStatus, string> = { running: "Running", waiting: "Waiting", needs_attention: "Needs attention", completed: "Completed", failed: "Failed", idle: "Idle" };
 const formatTime = (iso?: string) => iso ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(iso)) : "—";
 
-export interface InspectorPanelProps { threadId?: string; onClose?: () => void; onAddSubagent?: (threadId: string) => void; onEdit?: (threadId: string) => void; onArchive?: (threadId: string) => void; onDelete?: (threadId: string) => void; }
+export interface InspectorPanelProps { threadId?: string; isMapView?: boolean; onBackToNow?: () => void; onClose?: () => void; onAddSubagent?: (threadId: string) => void; onEdit?: (threadId: string) => void; onArchive?: (threadId: string) => void; onDelete?: (threadId: string) => void; }
 
-export function InspectorPanel({ threadId, onClose, onAddSubagent, onEdit, onArchive, onDelete }: InspectorPanelProps) {
+export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAddSubagent, onEdit, onArchive, onDelete }: InspectorPanelProps) {
   const [tab, setTab] = useState<InspectorTab>("overview");
   const [attentionDone, setAttentionDone] = useState(false);
   const [detail, setDetail] = useState<unknown>();
@@ -61,7 +61,7 @@ export function InspectorPanel({ threadId, onClose, onAddSubagent, onEdit, onArc
     }
     const runtime = response && typeof response === "object" && "status" in response ? String((response as { status?: string }).status) : "";
     const external = Boolean(response && typeof response === "object" && "externalRuntime" in response && (response as { externalRuntime?: boolean }).externalRuntime);
-    if (selectedThreadId && ["running", "needs_attention", "failed", "completed", "idle"].includes(runtime) && !(external && runtime === "idle")) setThreadRuntimeStatus(selectedThreadId, runtime as ThreadStatus);
+    if (selectedThreadId && ["running", "needs_attention", "failed", "completed", "idle"].includes(runtime) && !(external && (runtime === "idle" || runtime === "running"))) setThreadRuntimeStatus(selectedThreadId, runtime as ThreadStatus);
   }, [selectedThreadId, setThreadRuntimeStatus]);
 
   const refreshDetail = useCallback(async (showLoading = false) => {
@@ -145,6 +145,7 @@ export function InspectorPanel({ threadId, onClose, onAddSubagent, onEdit, onArc
       <p className={styles.key}><span className={styles.provider} style={{ color: provider.color, borderColor: `${provider.color}66` }}>{provider.shortLabel}</span>{thread.key}</p><h2>{thread.title}</h2>
       <div className={styles.meta}><span className={`${styles.status} ${styles[thread.status]}`}><i />{displayedStatus}</span><span><Clock3 size={13} /> {formatTime(thread.startedAt)}</span><span>{thread.model}</span><span>{thread.reasoningEffort}</span></div>
       <div className={styles.actions}>
+        {isMapView && onBackToNow && <button className={styles.primary} onClick={onBackToNow}><RotateCcw size={14}/> Back to Now</button>}
         {!live && (thread.status === "running" ? <><button onClick={() => action("waiting")}><Pause size={14}/> Pause</button><button className={styles.danger} onClick={() => action("idle")}><Square size={13}/> Stop</button></> : <button className={styles.primary} onClick={() => action("running")}><Play size={14}/> {thread.status === "waiting" ? "Resume" : "Run again"}</button>)}
         <button onClick={() => onEdit?.(thread.id)}>Rename / edit</button><button onClick={() => onArchive?.(thread.id)}>Archive</button><button className={styles.danger} onClick={() => onDelete?.(thread.id)}>{thread.provider === "claude" ? "Remove" : "Delete"}</button>
       </div>

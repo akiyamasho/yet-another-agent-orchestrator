@@ -140,10 +140,25 @@ Separate but cross-linked entities:
 ### 5.3 Top command bar
 
 - Breadcrumb: `All folders / agent-orchestration / Landing redesign`.
-- Segmented view control: `Map`, `List`, `Activity`.
-- Search / command trigger (`⌘K`).
+- Segmented view control: `Now`, `Map`, `List`, `Activity`.
+- Search / command trigger (`⌘⇧O`).
 - “New agent” primary action.
 - Attention bell with aggregate approval/error badge.
+
+### 5.3.1 Now workspace
+
+`Now` is a shipped first-class operational view for answering “what is running, and what can I resume next?” It contains two sections:
+
+- `Running now`: only threads whose current running state is reported by the provider integration.
+- `Recently active / resumable`: non-archived threads ordered by recency, so the latest useful conversations are easy to continue.
+
+Both sections are grouped by exact project/folder context, then by explicit provider subgroup (`Codex` or `Claude Code`). Provider labels remain text-visible and are not conveyed by color alone. A selected-folder filter narrows the view to that folder; the shared search/query filters project, provider, task title, path, status, and summary without changing the underlying selection model. Empty states distinguish “no matching tasks” from a disconnected provider.
+
+Recency is derived deterministically from the strongest available provider data: `updatedAt` first, then the latest normalized task event timestamp, then `finishedAt` or `startedAt`. Fresh activity inferred from timestamps is labeled `Recent external`; it must never be promoted to confirmed `running`. The UI must not infer a live run from stale timestamps. Codex tasks active in another client remain externally synced under the App Server limitation described in §3.1.1; they are not presented as locally running or falsely idle.
+
+Clicking an entry opens the existing inspector in place without leaving Now. `Show in constellation` switches to Map and locates that exact project/task node, preserving the selected thread. `Back to Now` returns to Now with the same task selected, folder scope, query, and scroll position where possible. Keyboard activation and Escape follow the same selection/focus restoration rules as Map and List.
+
+The Map must make live state legible without relying on motion or color: provider-reported running nodes and folders show an unmistakable text `LIVE` treatment and live counts. `Needs you` is equally explicit in text and counts wherever it appears. Threads with fresh provider timestamps but no provider-reported running signal are labeled `Recent external`; they do not receive live pulse treatment and do not contribute to confirmed-running counts.
 
 ### 5.4 Map overview
 
@@ -286,9 +301,15 @@ Attention state:
 - Filter chips for folders, statuses, agents, approvals, and time.
 - Selecting an event opens the same inspector and offers “Locate on map.”
 
-## 9. Command palette
+### Now
 
-`⌘K` opens a search-first command palette:
+- The Now view is the cross-project running/recent queue described in §5.3.1.
+- It shares folder scope, query, and selected-thread state with Map, List, and Activity.
+- It is a navigation surface, not a second task store: rows are projections of provider-reported threads and normalized events.
+
+## 9. Quick jump and command palette (`⌘⇧O`)
+
+`⌘⇧O` opens a search-first command palette:
 
 - Search folders, task titles, task keys, agent profiles, paths, branches, and output summaries.
 - Actions: new agent, add folder, fit overview, switch view, show attention, open recent thread.
@@ -435,16 +456,19 @@ The delivered app must:
 
 1. In Electron, open to the user’s actual non-archived Codex threads grouped by their exact `cwd`; never require four seeded folders or dummy tasks. If none are available, show a useful empty state with the connection reason and a folder picker.
 2. Smoothly focus a folder, select a main agent, and refocus a subagent while preserving spatial context.
-3. Provide functional Map, List, and Activity views sharing selection and filters.
-4. Provide working search/command palette.
-5. Create a folder context and create/edit/archive/restore a real Codex thread through the App Server; title edits use the supported name mutation and pinning is visibly local metadata. Add-subagent is enabled only when the live protocol can create a real child; otherwise it explains the limitation.
-6. Display an actionable approval/attention example with correct originating hierarchy.
-7. Provide responsive desktop/mobile layouts and reduced-motion behavior.
-8. Pass TypeScript/build checks and have no obvious console errors. Packaged Electron launch must work without `pnpm start` or a separate web server.
-9. Maintain useful controls if ambient particles or advanced motion fail.
-10. Avoid placeholder-style generic dashboard visuals: no white card grid, no neon gradient headline, and no fake 3D perspective that harms readability.
-11. Resume any selected Codex or Claude Code main agent/subagent from the Chat tab, including explicitly selected files or pasted clipboard-image attachments, without changing provider identity or task context.
-12. Check, download, SHA-256 verify, stage, and install a compatible newer GitHub Release from Settings, while keeping unsigned-build warnings explicit.
+3. Provide functional Map, Now, List, and Activity views sharing selection and filters.
+4. Provide a shipped Now view with `Running now` and `Recently active / resumable` sections, grouped by project and explicit Codex/Claude Code subgroups, using the documented provider-backed status and recency precedence.
+5. In Now, selected-folder and query filtering must work; clicking a row opens the inspector in place, `Show in constellation` locates the exact node, and `Back to Now` restores the same task selection and view context.
+6. In Map and Now, provider-reported running nodes/folders show explicit `LIVE` treatment and live counts; `Needs you` is equally explicit; `Recent external` never contributes to confirmed-running counts or live treatment.
+7. Provide working search/command palette.
+8. Create a folder context and create/edit/archive/restore a real Codex thread through the App Server; title edits use the supported name mutation and pinning is visibly local metadata. Add-subagent is enabled only when the live protocol can create a real child; otherwise it explains the limitation.
+9. Display an actionable approval/attention example with correct originating hierarchy.
+10. Provide responsive desktop/mobile layouts and reduced-motion behavior.
+11. Pass TypeScript/build checks and have no obvious console errors. Packaged Electron launch must work without `pnpm start` or a separate web server.
+12. Maintain useful controls if ambient particles or advanced motion fail.
+13. Avoid placeholder-style generic dashboard visuals: no white card grid, no neon gradient headline, and no fake 3D perspective that harms readability.
+14. Resume any selected Codex or Claude Code main agent/subagent from the Chat tab, including explicitly selected files or pasted clipboard-image attachments, without changing provider identity or task context.
+15. Check, download, SHA-256 verify, stage, and install a compatible newer GitHub Release from Settings, while keeping unsigned-build warnings explicit.
 
 ## 16. Integration hardening plan
 
