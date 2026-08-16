@@ -13,6 +13,8 @@ No local web server is needed after installation.
 
 ![Task inspector using synthetic data](docs/screenshots/constellation-demo-inspector.png)
 
+![Cross-project quick jump using synthetic data](docs/screenshots/constellation-demo-quick-jump.png)
+
 </details>
 
 > All repository screenshots use the synthetic fixtures in `lib/data/mockData.ts`. They contain no real project paths, tasks, transcripts, or artifacts.
@@ -20,7 +22,7 @@ No local web server is needed after installation.
 ## What works
 
 - Spatial folder → main task → nested subagent map with smooth focus and progressive disclosure.
-- Dense list, cross-project activity feed, and `⌘K` command search.
+- Dense list, cross-project activity feed, `⌘⇧O` quick jump to any project/task, and `⌘K` command search.
 - Provider identity everywhere: Codex is projector blue; Claude Code is warm coral.
 - Real Codex task discovery, transcript reads, live notifications, start, rename, settings, archive, restore, and delete through `codex app-server`.
 - Real Claude Code project/session discovery, transcript reads, start, resume, and bounded subagent delegation through the local `claude` CLI.
