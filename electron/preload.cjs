@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld("constellationDesktop", {
   },
   files: {
     selectAttachments: (input) => ipcRenderer.invoke("files:select-attachments", input),
+    pasteImage: () => ipcRenderer.invoke("files:paste-image"),
     preview: (filePath) => ipcRenderer.invoke("files:preview", filePath),
     reveal: (filePath) => ipcRenderer.invoke("files:reveal", filePath),
   },

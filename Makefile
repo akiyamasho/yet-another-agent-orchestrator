@@ -17,7 +17,7 @@ release:
 
 test:
 	npm run typecheck
-	node --test electron/codex/app-server-bridge.test.cjs electron/claude/provider.test.cjs electron/chat/timeline.test.cjs electron/updater/github-release-updater.test.cjs
+	node --test electron/codex/app-server-bridge.test.cjs electron/claude/provider.test.cjs electron/chat/timeline.test.cjs electron/attachments/clipboard-image.test.cjs electron/updater/github-release-updater.test.cjs
 
 clean:
 	rm -rf .next out release

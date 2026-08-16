@@ -1,22 +1,24 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState, type ClipboardEvent } from "react";
 import { File, FileImage, LoaderCircle, Paperclip, Send, X } from "lucide-react";
 import { splitProviderThreadId } from "@/lib/providers";
 import type { AgentThread } from "@/lib/types";
 import styles from "./ThreadComposer.module.css";
 
 type Attachment = { path: string; name: string; size: number; isImage: boolean };
+type ThreadComposerProps = { thread: AgentThread; cwd: string; onSent?: () => void | Promise<void> };
 
-export function ThreadComposer({ thread, cwd, onSent }: { thread: AgentThread; cwd: string; onSent?: () => void | Promise<void> }) {
+function ThreadComposerView({ thread, cwd, onSent }: ThreadComposerProps) {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
+  const [pasting, setPasting] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const desktop = typeof window !== "undefined" ? window.constellationDesktop : undefined;
   const providerLabel = thread.provider === "claude" ? "Claude Code" : "Codex";
-  const canSend = Boolean(message.trim() || attachments.length) && !busy && Boolean(desktop) && !thread.archived;
+  const canSend = Boolean(message.trim() || attachments.length) && !busy && !pasting && Boolean(desktop) && !thread.archived;
   const attachmentSummary = useMemo(() => attachments.reduce((total, item) => total + item.size, 0), [attachments]);
 
   const chooseAttachments = async () => {
@@ -31,6 +33,22 @@ export function ThreadComposer({ thread, cwd, onSent }: { thread: AgentThread; c
       });
     } catch (cause) {
       setError(composerError(cause, thread.provider ?? "codex"));
+    }
+  };
+
+  const pasteClipboardImage = async (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!desktop || !Array.from(event.clipboardData.items).some((item) => item.type.startsWith("image/"))) return;
+    event.preventDefault();
+    if (attachments.length >= 10) { setError("Remove an attachment before pasting another image (10 file limit)."); return; }
+    setPasting(true); setError(undefined); setNotice(undefined);
+    try {
+      const pasted = await desktop.files.pasteImage();
+      setAttachments((current) => current.some((item) => item.path === pasted.path) ? current : [...current, pasted].slice(0, 10));
+      setNotice("Clipboard image attached.");
+    } catch (cause) {
+      setError(composerError(cause, thread.provider ?? "codex"));
+    } finally {
+      setPasting(false);
     }
   };
 
@@ -53,15 +71,26 @@ export function ThreadComposer({ thread, cwd, onSent }: { thread: AgentThread; c
   return <section className={styles.composer} aria-label={`Continue ${thread.title}`}>
     {attachments.length > 0 && <div className={styles.attachments} aria-label={`${attachments.length} attached files`}>{attachments.map((item) => <span className={styles.attachment} key={item.path} title={item.path}>{item.isImage ? <FileImage size={14}/> : <File size={14}/>}<span><strong>{item.name}</strong><small>{formatBytes(item.size)}</small></span><button onClick={() => setAttachments((current) => current.filter((candidate) => candidate.path !== item.path))} aria-label={`Remove ${item.name}`}><X size={13}/></button></span>)}</div>}
     <div className={styles.inputRow}>
-      <button className={styles.attachButton} onClick={() => void chooseAttachments()} disabled={!desktop || busy} aria-label="Attach files" title="Attach files"><Paperclip size={17}/></button>
-      <textarea value={message} onChange={(event) => { setMessage(event.target.value); setNotice(undefined); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} rows={2} placeholder={desktop ? `Continue this ${providerLabel} ${thread.parentId ? "subagent" : "agent"}…` : "Continuation is available in the Electron app"} disabled={!desktop || thread.archived} />
+      <button className={styles.attachButton} onClick={() => void chooseAttachments()} disabled={!desktop || busy || pasting} aria-label="Attach files" title="Attach files"><Paperclip size={17}/></button>
+      <textarea value={message} onChange={(event) => { setMessage(event.target.value); setNotice(undefined); }} onPaste={(event) => void pasteClipboardImage(event)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} rows={2} placeholder={desktop ? `Continue this ${providerLabel} ${thread.parentId ? "subagent" : "agent"}…` : "Continuation is available in the Electron app"} disabled={!desktop || thread.archived} />
       <button className={styles.sendButton} onClick={() => void send()} disabled={!canSend} aria-label={`Send to ${providerLabel}`}>{busy ? <LoaderCircle className={styles.spin} size={17}/> : <Send size={17}/>}</button>
     </div>
-    <div className={styles.footer}><span>{desktop ? <><kbd>Enter</kbd> send · <kbd>Shift Enter</kbd> newline</> : "DEMO · read-only provider fixture"}</span>{attachments.length > 0 && <span>{attachments.length}/10 files · {formatBytes(attachmentSummary)}</span>}</div>
+    <div className={styles.footer}><span>{desktop ? <><kbd>Enter</kbd> send · <kbd>Shift Enter</kbd> newline · <kbd>⌘V</kbd> image</> : "DEMO · read-only provider fixture"}</span>{pasting ? <span>Attaching clipboard image…</span> : attachments.length > 0 && <span>{attachments.length}/10 files · {formatBytes(attachmentSummary)}</span>}</div>
     {error && <p className={styles.error} role="alert">{error}</p>}
     {notice && <p className={styles.notice} aria-live="polite">{notice}</p>}
   </section>;
 }
+
+export const ThreadComposer = memo(ThreadComposerView, (previous, next) =>
+  previous.cwd === next.cwd
+  && previous.onSent === next.onSent
+  && previous.thread.id === next.thread.id
+  && previous.thread.title === next.thread.title
+  && previous.thread.provider === next.thread.provider
+  && previous.thread.parentId === next.thread.parentId
+  && previous.thread.archived === next.thread.archived
+);
+ThreadComposer.displayName = "ThreadComposer";
 
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;

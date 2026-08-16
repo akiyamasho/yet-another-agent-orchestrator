@@ -61,7 +61,7 @@ export function AgentDialogs({ mode, open = Boolean(mode), onClose, folderId, th
   };
 
   const destructive = mode === "archive" || mode === "delete";
-  const heading = mode === "folder" ? "Add folder" : mode === "agent" ? "Create main agent" : mode === "subagent" ? "Add subagent" : mode === "edit" ? "Edit agent" : mode === "delete" ? (provider === "claude" ? "Remove task" : "Delete task") : "Archive task";
+  const heading = mode === "folder" ? "Add folder" : mode === "agent" ? "Create main agent" : mode === "subagent" ? "Add subagent" : mode === "edit" ? "Edit task" : mode === "delete" ? (provider === "claude" ? "Remove task" : "Delete task") : "Archive task";
   const warning = provider === "claude"
     ? mode === "delete" ? "Remove this Claude Code session from Constellation? Its original local Claude history remains untouched and resumable." : "Archive this Claude Code session in Constellation? Its original local Claude history remains untouched."
     : mode === "delete" ? "Permanently delete this Codex task history? This cannot be undone." : "Archive this Codex task? It will leave active views but remain recoverable through Codex.";

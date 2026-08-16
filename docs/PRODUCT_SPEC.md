@@ -217,8 +217,9 @@ File access is mediated by narrow Electron IPC. The renderer cannot read arbitra
 
 ### 6.1 Continue the selected chat
 
-- A persistent composer remains at the bottom of the inspector for every non-archived main agent and subagent.
-- `Enter` sends; `Shift+Enter` inserts a newline. The composer accepts up to 10 explicitly selected local files, each capped at 25 MB, and shows removable attachment chips before sending.
+- The composer mounts at the bottom of the inspector only while the `Chat` tab is open, for every non-archived main agent and subagent. It remains isolated from background transcript and workspace refreshes so typing stays responsive.
+- `Enter` sends; `Shift+Enter` inserts a newline. The composer accepts up to 10 explicitly selected local files, each capped at 25 MB, and shows removable attachment chips before sending. Pasting an image with `⌘V` adds it as a provider-native image attachment without interfering with ordinary text paste.
+- Clipboard images are read only by Electron's main process through a no-argument IPC method, encoded as private PNGs under Electron `userData`, granted for the current attachment flow, and cleaned after seven days.
 - Codex resumes the exact provider thread. If the latest turn is active, Constellation uses `turn/steer` with its expected turn id; otherwise it starts a new turn. Images are sent as App Server `localImage` input items, while other files are supplied as canonical project paths in the text input.
 - Claude Code resumes the exact session with `claude -p --resume <session-id>`. Attachments use explicit `@path` references and `--add-dir` grants when a selected file is outside the task cwd.
 - Sending never creates a renderer-only continuation. The transcript refreshes from the provider source of truth and continues updating from live notifications.
@@ -242,6 +243,12 @@ Attention state:
 - Available from the selected folder or global `New agent` button.
 - Fields: context folder, task title, objective, agent profile, model, reasoning effort, permission mode, optional branch/worktree.
 - Provider is explicit: `Codex` or `Claude Code`. Preview shows the resulting provider/node identity before creation.
+
+### Rename or edit a task
+
+- `Rename / edit` opens the selected task with its current title prefilled.
+- Codex names use the supported App Server `thread/name/set` mutation and refresh from provider state after saving.
+- Claude Code display names use Constellation's explicit Electron `userData` overlay; provider-owned Claude JSONL history remains read-only.
 
 ### Add subagent
 
@@ -436,7 +443,7 @@ The delivered app must:
 8. Pass TypeScript/build checks and have no obvious console errors. Packaged Electron launch must work without `pnpm start` or a separate web server.
 9. Maintain useful controls if ambient particles or advanced motion fail.
 10. Avoid placeholder-style generic dashboard visuals: no white card grid, no neon gradient headline, and no fake 3D perspective that harms readability.
-11. Resume any selected Codex or Claude Code main agent/subagent from the inspector, including explicitly selected file attachments, without changing provider identity or task context.
+11. Resume any selected Codex or Claude Code main agent/subagent from the Chat tab, including explicitly selected files or pasted clipboard-image attachments, without changing provider identity or task context.
 12. Check, download, SHA-256 verify, stage, and install a compatible newer GitHub Release from Settings, while keeping unsigned-build warnings explicit.
 
 ## 16. Integration hardening plan

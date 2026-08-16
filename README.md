@@ -26,11 +26,11 @@ No local web server is needed after installation.
 - Spatial folder → main task → nested subagent map with smooth focus and progressive disclosure.
 - Dense list, cross-project activity feed, `⌘⇧O` quick jump to any project/task, and `⌘K` command search.
 - Provider identity everywhere: Codex is projector blue; Claude Code is warm coral.
-- Real Codex task discovery, transcript reads, live notifications, start, rename, settings, archive, restore, and delete through `codex app-server`.
+- Real Codex task discovery, transcript reads, live notifications, start, task-name updates, settings, archive, restore, and delete through `codex app-server`.
 - Real Claude Code project/session discovery, transcript reads, start, resume, and bounded subagent delegation through the local `claude` CLI.
-- Continue any selected main task or subagent in the **Chat** tab, with chronological provider-native transcript refresh, `Enter` to send, and local file/image attachments.
+- Continue any selected main task or subagent in the **Chat** tab, with chronological provider-native transcript refresh, `Enter` to send, local file attachments, and direct `⌘V` clipboard-image attachments.
 - Inline Codex and Claude Code messages, reasoning/progress, plans, commands, tools, subagents, changed files, results, and image artifacts without flattening the conversation into a generic output list.
-- Responsive Chat history with bounded initial rendering, on-demand older items, non-overlapping provider refreshes, and aggressive wrapping for long commands, paths, URLs, and errors.
+- Responsive Chat history with bounded initial rendering, on-demand older items, non-overlapping provider refreshes, aggressive wrapping for long commands, paths, URLs, and errors, and an isolated composer that mounts only while Chat is open.
 - Secure in-app image thumbnails/enlarged previews and **Reveal in Finder** links.
 - Comfortable wide-screen typography plus 100%, 110%, and 120% interface scaling in Settings.
 - User-triggered GitHub Releases updates with exact-asset SHA-256 verification and staged rollback-safe replacement.
@@ -78,7 +78,8 @@ The direct npm scripts remain available in `package.json`.
 ## Privacy and security
 
 - Electron uses context isolation, sandboxing, no renderer Node integration, and a narrow preload API.
-- Preview/reveal canonicalizes paths and only allows files beneath a provider-discovered or explicitly registered project root. Composer attachments outside those roots require an explicit native file-picker grant that expires after one hour.
+- Preview/reveal canonicalizes paths and only allows files beneath a provider-discovered or explicitly registered project root. Composer attachments outside those roots require an explicit native file-picker or clipboard-image grant that expires after one hour.
+- Pasted images cross a dedicated no-argument IPC boundary, are encoded as private PNG files under Electron `userData`, are limited to 25 MB, and are automatically removed after seven days.
 - Image preview accepts supported local image formats up to 25 MB and returns a decoded data URL; the renderer receives no arbitrary filesystem API.
 - Updates require an explicit check/download/install action, verify the exact ZIP against `SHA256SUMS.txt`, validate bundle id/version before replacement, and retain a recoverable previous app until a successful relaunch.
 - Registered folders and Claude presentation overlays live in Electron `userData`. Provider-owned histories remain the source of truth.

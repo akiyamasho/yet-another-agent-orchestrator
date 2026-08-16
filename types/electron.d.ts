@@ -56,6 +56,7 @@ declare global {
       };
       files: {
         selectAttachments: (input: { cwd: string }) => Promise<AgentAttachment[]>;
+        pasteImage: () => Promise<AgentAttachment>;
         preview: (filePath: string) => Promise<{ dataUrl: string; width: number; height: number; name: string }>;
         reveal: (filePath: string) => Promise<boolean>;
       };

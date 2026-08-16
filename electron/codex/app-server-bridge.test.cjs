@@ -18,6 +18,7 @@ function fakeSpawn() {
     if (message.method === 'thread/list') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { data: [{ id: message.params.archived ? 'archived' : 'active' }], nextCursor: null } }) + '\n');
     if (message.method === 'turn/start') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { turn: { id: 'turn-1' }, received: message.params } }) + '\n');
     if (message.method === 'turn/steer') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { turnId: message.params.expectedTurnId, received: message.params } }) + '\n');
+    if (message.method === 'thread/name/set') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { received: message.params } }) + '\n');
   });
   return child;
 }
@@ -51,5 +52,13 @@ test('starts and steers turns with provider-native attachment inputs', async () 
   const steered = await bridge.steerTurn('thread-1', 'turn-1', input);
   assert.equal(steered.turnId, 'turn-1');
   assert.deepEqual(steered.received.input, input);
+  bridge.close();
+});
+
+test('renames a task with the current app-server thread/name/set method', async () => {
+  const bridge = new CodexAppServerBridge({ spawn: () => fakeSpawn(), requestTimeoutMs: 500 });
+  await bridge.connect();
+  const renamed = await bridge.setThreadName('thread-1', 'Release audit');
+  assert.deepEqual(renamed.received, { threadId: 'thread-1', name: 'Release audit' });
   bridge.close();
 });

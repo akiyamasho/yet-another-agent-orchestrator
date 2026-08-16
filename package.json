@@ -1,6 +1,6 @@
 {
   "name": "constellation",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "A local Electron command center for Codex and Claude Code agents.",
   "author": "Sho Akiyama",
   "license": "MIT",

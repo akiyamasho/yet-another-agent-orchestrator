@@ -1,9 +1,10 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, nativeImage, shell } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 const { CodexAppServerBridge } = require("./codex/app-server-bridge.cjs");
 const { ClaudeCodeProvider } = require("./claude/provider.cjs");
 const { normalizeCodexTimeline, normalizeClaudeTimeline } = require("./chat/timeline.cjs");
+const { cleanupClipboardImages, saveClipboardImage } = require("./attachments/clipboard-image.cjs");
 const { GitHubReleaseUpdater } = require("./updater/github-release-updater.cjs");
 
 const isMac = process.platform === "darwin";
@@ -401,6 +402,7 @@ function registerIpc() {
     if (result.canceled) return [];
     return result.filePaths.slice(0, MAX_ATTACHMENTS).map(grantAttachment);
   });
+  ipcMain.handle("files:paste-image", () => grantAttachment(saveClipboardImage({ image: clipboard.readImage(), userData: app.getPath("userData"), maxBytes: MAX_ATTACHMENT_BYTES })));
   ipcMain.handle("codex:snapshot", () => snapshot());
   ipcMain.handle("codex:read-thread", async (_event, threadId) => {
     const raw = await (await ensureCodex()).readThread(String(threadId), { includeTurns: true });
@@ -515,6 +517,8 @@ function createWindow() {
 
 app.whenReady().then(() => {
   releaseUpdater = createReleaseUpdater();
+  try { cleanupClipboardImages({ userData: app.getPath("userData") }); }
+  catch (error) { console.error(`Could not clean old clipboard images: ${error.message}`); }
   registerIpc();
   Menu.setApplicationMenu(null);
   createWindow();

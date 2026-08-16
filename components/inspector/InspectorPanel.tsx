@@ -123,6 +123,14 @@ export function InspectorPanel({ threadId, onClose, onAddSubagent, onEdit, onArc
     });
   }, [folder?.path, loadPreview, previews, tab, timeline]);
 
+  const handleComposerSent = useCallback(async () => {
+    if (!selectedThreadId) return;
+    setThreadRuntimeStatus(selectedThreadId, "running");
+    await syncFromSource();
+    window.setTimeout(() => void refreshDetail(false), 450);
+    window.setTimeout(() => void refreshDetail(false), 1600);
+  }, [refreshDetail, selectedThreadId, setThreadRuntimeStatus, syncFromSource]);
+
   if (!thread || !folder) return null;
   const live = connectionStatus !== "demo";
   const provider = providerMeta(thread.provider ?? "codex");
@@ -138,7 +146,7 @@ export function InspectorPanel({ threadId, onClose, onAddSubagent, onEdit, onArc
       <div className={styles.meta}><span className={`${styles.status} ${styles[thread.status]}`}><i />{displayedStatus}</span><span><Clock3 size={13} /> {formatTime(thread.startedAt)}</span><span>{thread.model}</span><span>{thread.reasoningEffort}</span></div>
       <div className={styles.actions}>
         {!live && (thread.status === "running" ? <><button onClick={() => action("waiting")}><Pause size={14}/> Pause</button><button className={styles.danger} onClick={() => action("idle")}><Square size={13}/> Stop</button></> : <button className={styles.primary} onClick={() => action("running")}><Play size={14}/> {thread.status === "waiting" ? "Resume" : "Run again"}</button>)}
-        <button onClick={() => onEdit?.(thread.id)}>Edit</button><button onClick={() => onArchive?.(thread.id)}>Archive</button><button className={styles.danger} onClick={() => onDelete?.(thread.id)}>{thread.provider === "claude" ? "Remove" : "Delete"}</button>
+        <button onClick={() => onEdit?.(thread.id)}>Rename / edit</button><button onClick={() => onArchive?.(thread.id)}>Archive</button><button className={styles.danger} onClick={() => onDelete?.(thread.id)}>{thread.provider === "claude" ? "Remove" : "Delete"}</button>
       </div>
     </div>
     {attention && <section className={styles.attention} aria-live="polite"><div className={styles.attentionTitle}><CircleAlert size={17}/> Action required</div><strong>{thread.attention?.kind === "approval" ? "Approval requested" : "Input needed"}</strong><p>{thread.attention?.message}</p><small>From {thread.title} · {thread.permission}</small>{live ? <p className={styles.liveNotice}>Respond in the original {provider.label} task. Constellation keeps this read-only until the provider reports the response.</p> : <div className={styles.attentionActions}><button className={styles.primary} onClick={() => setAttentionDone(true)}>Approve once</button><button onClick={() => setAttentionDone(true)}>Always allow…</button><button className={styles.reject} onClick={() => { setAttentionDone(true); action("failed"); }}>Reject</button></div>}</section>}
@@ -149,7 +157,7 @@ export function InspectorPanel({ threadId, onClose, onAddSubagent, onEdit, onArc
       {tab === "activity" && <section className={styles.timeline}>{activity.length ? activity.map((event) => <article key={event.id}><span className={`${styles.eventDot} ${styles[event.type]}`} /><div><strong>{event.title}</strong><p>{event.detail}</p><time>{formatTime(event.timestamp)}</time></div></article>) : <p className={styles.empty}>No activity recorded for this thread.</p>}</section>}
       {tab === "chat" && <section className={styles.output}>{focusedPreview && <div className={styles.focusedPreview}><button onClick={() => setFocusedPreview(undefined)} aria-label="Close image preview"><X size={14}/></button><img src={focusedPreview.dataUrl} alt={focusedPreview.name}/><div><strong>{focusedPreview.name}</strong><small>{focusedPreview.path}</small><button onClick={() => void reveal(focusedPreview.path)}>Reveal in Finder</button></div></div>}<AgentChatTimeline timeline={timeline} provider={thread.provider ?? "codex"} loading={detailLoading} error={detailError} previews={previews} onPreview={(filePath) => void loadPreview(filePath, true)} onReveal={(filePath) => void reveal(filePath)} /></section>}
     </div>
-    <ThreadComposer thread={thread} cwd={folder.path} onSent={async () => { setTab("chat"); setThreadRuntimeStatus(thread.id, "running"); await syncFromSource(); window.setTimeout(() => void refreshDetail(false), 450); window.setTimeout(() => void refreshDetail(false), 1600); }} />
+    {tab === "chat" && <ThreadComposer thread={thread} cwd={folder.path} onSent={handleComposerSent} />}
   </aside>;
 }
 
