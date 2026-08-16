@@ -1,0 +1,210 @@
+.view {
+    padding: clamp(20px, 4vw, 48px);
+    max-width: 980px;
+    margin: 0 auto;
+    color: #e7eaf6;
+}
+.heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+}
+.kicker {
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: #8290b5;
+    font-size: 11px;
+    margin: 0 0 8px;
+}
+.heading h2 {
+    margin: 0;
+    font-size: clamp(26px, 3vw, 40px);
+    letter-spacing: -0.04em;
+}
+.subtle {
+    color: #8994b1;
+    font-size: 13px;
+    margin: 8px 0 0;
+}
+.count {
+    color: #91a1c2;
+    font-size: 12px;
+}
+.filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin: 26px 0;
+}
+.filters button {
+    background: #131a32;
+    color: #9daacc;
+    border: 1px solid #273253;
+    border-radius: 99px;
+    padding: 7px 11px;
+    font-size: 11px;
+    cursor: pointer;
+}
+.filters button.active {
+    background: #293655;
+    color: #fff;
+    border-color: #7d9ed7;
+}
+.needs,
+.timeline {
+    border: 1px solid #202b4a;
+    border-radius: 12px;
+    background: rgba(11, 16, 34, 0.72);
+    padding: 16px;
+    margin-bottom: 18px;
+}
+.needs {
+    border-color: #69374c;
+    background: rgba(35, 16, 32, 0.55);
+}
+.sectionHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 7px;
+}
+.sectionHead h3 {
+    margin: 0;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+}
+.sectionHead span {
+    font-size: 11px;
+    color: #8e9dbe;
+}
+.view ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.event {
+    position: relative;
+    border-top: 1px solid #202b45;
+}
+.event:first-child {
+    border-top: 0;
+}
+.eventButton {
+    width: 100%;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    text-align: left;
+    background: none;
+    border: 0;
+    color: inherit;
+    padding: 14px 4px;
+    cursor: pointer;
+}
+.icon {
+    width: 28px;
+    height: 28px;
+    border: 1px solid currentColor;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    flex: none;
+}
+.icon svg {
+    width: 14px;
+    height: 14px;
+}
+.body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+}
+.eventTitle {
+    font-size: 13px;
+    font-weight: 650;
+}
+.eventMeta {
+    font-size: 11px;
+    color: #8290af;
+}
+.eventMeta b {
+    color: #b6c8ef;
+}
+.detail {
+    font-size: 12px;
+    color: #a4b0ca;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.eventButton time {
+    font-size: 10px;
+    color: #73809d;
+    white-space: nowrap;
+}
+.urgent .eventTitle {
+    color: #ffb2bc;
+}
+.locate {
+    position: absolute;
+    right: 5px;
+    bottom: 10px;
+    background: none;
+    border: 0;
+    color: #8fc9ff;
+    font-size: 10px;
+    cursor: pointer;
+}
+.empty {
+    color: #8491ad;
+    font-size: 12px;
+    padding: 16px 4px;
+    margin: 0;
+}
+@media (max-width: 600px) {
+    .heading {
+        align-items: flex-start;
+        gap: 12px;
+        flex-direction: column;
+    }
+    .eventButton {
+        padding-right: 0;
+    }
+    .eventButton time {
+        display: none;
+    }
+}
+
+.view { color: var(--text); }
+.kicker,
+.subtle,
+.count,
+.filters button,
+.eventMeta,
+.eventButton time { font-family: "IBM Plex Mono", monospace; }
+.kicker { color: var(--gold); }
+.heading h2 {
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: clamp(42px, 6vw, 72px);
+    font-weight: 600;
+    line-height: 0.9;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+}
+.subtle,
+.count,
+.eventMeta,
+.eventButton time { color: var(--quiet); }
+.filters button { border-radius: 0; border-color: var(--line); background: transparent; }
+.filters button.active { color: var(--canvas); border-color: var(--projector); background: var(--projector); }
+.needs,
+.timeline { border-radius: 0; border-color: var(--line); background: rgba(10, 15, 19, 0.75); }
+.needs { border-color: rgba(226,184,75,.35); background: rgba(226,184,75,.045); }
+.event { border-color: var(--line); }
+.icon { border-radius: 0; }
+.eventTitle { color: var(--text); font-weight: 500; }
+.detail { color: var(--muted); }
+.urgent .eventTitle { color: var(--gold); }
+.locate { color: var(--projector); font-family: "IBM Plex Mono", monospace; text-transform: uppercase; }

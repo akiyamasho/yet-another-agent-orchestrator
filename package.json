@@ -1,0 +1,67 @@
+{
+  "name": "constellation",
+  "version": "0.1.0",
+  "description": "A local Electron command center for Codex and Claude Code agents.",
+  "author": "Sho Akiyama",
+  "license": "MIT",
+  "repository": "https://github.com/akiyamasho/yet-another-agent-orchestrator",
+  "private": true,
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "desktop": "npm run build && electron .",
+    "desktop:open": "electron .",
+    "dist": "npm run build && electron-builder --mac --arm64",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@fontsource/barlow-condensed": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@xyflow/react": "^12.8.6",
+    "lucide-react": "^0.468.0",
+    "motion": "^11.15.0",
+    "next": "^15.2.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zustand": "^5.0.3",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.3",
+    "@types/react-dom": "^19.0.2",
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.17.0",
+    "eslint-config-next": "^15.2.0",
+    "prettier": "^3.9.6",
+    "typescript": "^5.7.2"
+  },
+  "allowScripts": {
+    "electron@43.4.0": true
+  },
+  "build": {
+    "appId": "com.shoko.constellation",
+    "productName": "Constellation",
+    "asar": true,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    }
+  }
+}

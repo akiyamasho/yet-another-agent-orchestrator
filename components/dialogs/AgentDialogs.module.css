@@ -1,0 +1,233 @@
+.backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    background: rgba(2, 5, 16, 0.72);
+    backdrop-filter: blur(5px);
+}
+.dialog {
+    position: relative;
+    width: min(560px, 100%);
+    max-height: calc(100vh - 36px);
+    overflow: auto;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 14px;
+    padding: 25px;
+    color: #e8eef8;
+    background: #111a2e;
+    box-shadow: 0 24px 90px rgba(0, 0, 0, 0.48);
+    font:
+        14px/1.45 system-ui,
+        sans-serif;
+}
+.close {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    border: 0;
+    background: none;
+    color: #95a4bb;
+    cursor: pointer;
+}
+.eyebrow {
+    margin: 0 0 5px;
+    color: #67e8f9;
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding-right: 25px;
+}
+.dialog h2 {
+    margin: 0 0 19px;
+    font-size: 21px;
+}
+.fields {
+    display: grid;
+    gap: 15px;
+}
+.fields label,
+.check {
+    display: grid;
+    gap: 6px;
+    color: #aebbd0;
+    font-size: 12px;
+    font-weight: 650;
+}
+.fields input,
+.fields select,
+.fields textarea {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #2b3952;
+    border-radius: 7px;
+    padding: 9px 10px;
+    outline: none;
+    color: #e7edf7;
+    background: #0c1425;
+    font: inherit;
+    font-size: 13px;
+}
+.fields input:focus,
+.fields select:focus,
+.fields textarea:focus {
+    border-color: #67e8f9;
+    box-shadow: 0 0 0 2px rgba(103, 232, 249, 0.14);
+}
+.fields input[type="color"] {
+    height: 38px;
+    padding: 3px;
+}
+.grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 13px;
+}
+.footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 23px;
+}
+.footer button {
+    border: 1px solid #30405b;
+    border-radius: 7px;
+    padding: 9px 13px;
+    background: #1a2740;
+    color: #dce5f3;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+}
+.footer .submit {
+    background: #67e8f9;
+    color: #07111d;
+    border-color: #67e8f9;
+    font-weight: 750;
+}
+.submitDanger {
+    background: #fb7185 !important;
+    border-color: #fb7185 !important;
+    color: #260811 !important;
+    font-weight: 750;
+}
+.error {
+    margin: 14px 0 0;
+    color: #fda4af;
+    font-size: 12px;
+}
+.warning {
+    margin: 0;
+    padding: 14px;
+    border-radius: 8px;
+    color: #cdd8e8;
+    background: rgba(251, 113, 133, 0.1);
+    border: 1px solid rgba(251, 113, 133, 0.25);
+}
+.check {
+    margin-top: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.check input {
+    accent-color: #67e8f9;
+}
+.check label {
+    display: inline;
+}
+@media (max-width: 480px) {
+    .dialog {
+        padding: 20px 16px;
+    }
+    .grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.backdrop { background: rgba(4, 7, 10, 0.82); backdrop-filter: blur(10px); }
+.dialog {
+    color: var(--text);
+    border-radius: 0;
+    border-color: var(--line-strong);
+    background: var(--panel);
+    box-shadow: 0 28px 100px rgba(0, 0, 0, 0.56);
+    font-family: "IBM Plex Sans", sans-serif;
+}
+.eyebrow,
+.fields label,
+.check,
+.footer button { font-family: "IBM Plex Mono", monospace; letter-spacing: 0.07em; }
+.eyebrow { color: var(--gold); font-size: 9px; text-transform: uppercase; }
+.dialog h2 {
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 30px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+.fields label,
+.check { color: var(--muted); font-size: 9px; text-transform: uppercase; }
+.fields input,
+.fields select,
+.fields textarea {
+    color: var(--text);
+    border-radius: 0;
+    border-color: var(--line);
+    background: var(--surface);
+}
+.fields input:focus,
+.fields select:focus,
+.fields textarea:focus { border-color: var(--projector); box-shadow: 0 0 0 1px var(--projector); }
+.footer button {
+    border-radius: 0;
+    border-color: var(--line);
+    background: transparent;
+    font-size: 9px;
+    text-transform: uppercase;
+}
+.footer button:hover { border-color: var(--projector); }
+.footer .submit { color: var(--canvas); border-color: var(--gold); background: var(--gold); }
+.submitDanger { color: var(--canvas) !important; border-color: #ca6d64 !important; background: #ca6d64 !important; }
+.warning { border-radius: 0; }
+.check input { accent-color: var(--gold); }
+.providerRow,
+.providerBanner { display: flex; align-items: center; gap: 10px; margin: 0 0 15px; }
+.providerLabel { color: var(--muted); font: 9px "IBM Plex Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.providerOptions { display: flex; gap: 7px; }
+.providerOption { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 0 9px; color: var(--muted); border: 1px solid var(--line); background: transparent; cursor: pointer; font: 9px "IBM Plex Mono", monospace; letter-spacing: .05em; text-transform: uppercase; }
+.providerOption:hover:not(:disabled), .providerActive { color: var(--text); border-color: var(--projector); background: rgba(122, 167, 184, .09); }
+.providerOption:disabled { cursor: default; opacity: .9; }
+.providerOption small { color: var(--quiet); font-size: 7px; }
+.providerDot { width: 6px; height: 6px; display: inline-block; border-radius: 50%; background: #c9875c; }
+.providerDot.codex { background: var(--projector); }
+.providerDot.claude { background: #c9875c; }
+.providerBanner { padding: 8px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.providerBanner span { color: var(--quiet); font: 9px "IBM Plex Mono", monospace; letter-spacing: .04em; text-transform: uppercase; }
+.pathPicker {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: 8px;
+}
+.pathPicker button {
+    min-height: 37px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 12px;
+    color: var(--text);
+    border: 1px solid var(--line);
+    background: transparent;
+    cursor: pointer;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 9px;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+}
+.pathPicker button:hover { color: var(--canvas); border-color: var(--projector); background: var(--projector); }

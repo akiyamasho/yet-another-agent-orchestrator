@@ -1,0 +1,221 @@
+'use strict';
+
+const { EventEmitter } = require('node:events');
+const { spawn: defaultSpawn } = require('node:child_process');
+const fs = require('node:fs');
+const fsp = fs.promises;
+const os = require('node:os');
+const path = require('node:path');
+
+class ClaudeCodeError extends Error {
+  constructor(message, details = {}) {
+    super(message);
+    this.name = 'ClaudeCodeError';
+    Object.assign(this, details);
+  }
+}
+
+function textFromContent(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map((part) => {
+    if (typeof part === 'string') return part;
+    if (part && typeof part.text === 'string') return part.text;
+    if (part && part.type === 'tool_result' && typeof part.content === 'string') return part.content;
+    return '';
+  }).filter(Boolean).join('\n');
+}
+
+function recordText(record) {
+  return textFromContent(record?.message?.content) || textFromContent(record?.content) ||
+    (typeof record?.text === 'string' ? record.text : '');
+}
+
+function firstUserText(records) {
+  const named = [...records].reverse().find((record) => record.type === 'ai-title' && (record.title || record.text));
+  if (named) return String(named.title || named.text).trim().slice(0, 180);
+  const item = records.find((record) => record.type === 'user' && recordText(record).trim());
+  return recordText(item).replace(/<[^>]+>/g, '').trim().slice(0, 180) || 'Untitled session';
+}
+
+function iso(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function isImage(filePath) {
+  return /\.(?:png|jpe?g|gif|webp|avif|svg|bmp|tiff?)$/i.test(filePath);
+}
+
+function extractFiles(records) {
+  const paths = new Set();
+  const source = records.map(recordText).join('\n');
+  // Paths in Claude's IDE-selection wrapper can contain spaces. Capture media
+  // paths by extension before falling back to whitespace-delimited paths.
+  for (const match of source.matchAll(/((?:\/|~\/)[^\n<>"'`]+?\.(?:png|jpe?g|gif|webp|avif|svg|bmp|tiff?|pdf|md|txt|tsx?|jsx?|py|json))(?:[),.;:]|\s|$)/gi)) {
+    const candidate = match[1].trim();
+    paths.add(candidate.startsWith('~/') ? path.join(os.homedir(), candidate.slice(2)) : candidate);
+  }
+  for (const match of source.matchAll(/(?:^|[\s(`])((?:\/|~\/)[^\s)`<>"']+)/g)) {
+    const candidate = match[1].replace(/[.,;:]+$/, '');
+    const expanded = candidate.startsWith('~/') ? path.join(os.homedir(), candidate.slice(2)) : candidate;
+    paths.add(expanded);
+  }
+  return [...paths].map((filePath) => ({ path: filePath, kind: isImage(filePath) ? 'image' : 'file' }));
+}
+
+async function readJsonLines(filePath) {
+  let source;
+  try { source = await fsp.readFile(filePath, 'utf8'); }
+  catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'EACCES') return [];
+    throw error;
+  }
+  const records = [];
+  for (const [lineNumber, line] of source.split(/\r?\n/).entries()) {
+    if (!line.trim()) continue;
+    try { records.push(JSON.parse(line)); }
+    catch { records.push({ type: 'parse-error', lineNumber: lineNumber + 1, raw: line }); }
+  }
+  return records;
+}
+
+async function findJsonLines(directory) {
+  const files = [];
+  let entries;
+  try { entries = await fsp.readdir(directory, { withFileTypes: true }); }
+  catch (error) { if (error.code === 'ENOENT' || error.code === 'EACCES') return files; throw error; }
+  for (const entry of entries) {
+    const item = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...await findJsonLines(item));
+    else if (entry.isFile() && entry.name.endsWith('.jsonl')) files.push(item);
+  }
+  return files;
+}
+
+function sessionFromRecords(filePath, records) {
+  if (!records.length) return null;
+  const first = records.find((r) => r.sessionId) || records[0];
+  const sidechainPath = filePath.includes(`${path.sep}subagents${path.sep}`);
+  const agentId = records.find((r) => r.agentId)?.agentId;
+  const sessionId = sidechainPath ? agentId || path.basename(filePath, '.jsonl') : first.sessionId || path.basename(filePath, '.jsonl');
+  const cwd = records.find((r) => typeof r.cwd === 'string')?.cwd || null;
+  const timestamps = records.map((r) => r.timestamp).filter(Boolean).map((v) => new Date(v).getTime()).filter(Number.isFinite);
+  const model = records.find((r) => r.message?.model)?.message.model || records.find((r) => r.model)?.model || null;
+  const last = records[records.length - 1];
+  const parent = records.find((r) => r.parentSessionId || r.parentThreadId)?.parentSessionId ||
+    records.find((r) => r.parentSessionId || r.parentThreadId)?.parentThreadId ||
+    (sidechainPath ? path.basename(path.dirname(path.dirname(filePath))) : null);
+  const sidechain = sidechainPath || records.some((r) => r.isSidechain === true);
+  return {
+    id: sessionId,
+    provider: 'claude',
+    title: firstUserText(records),
+    cwd,
+    project: cwd ? path.basename(cwd) : path.basename(path.dirname(filePath)),
+    model,
+    createdAt: iso(timestamps.length ? Math.min(...timestamps) : null),
+    updatedAt: iso(timestamps.length ? Math.max(...timestamps) : null),
+    status: last.type === 'result' || last.type === 'summary' ? 'completed' : 'idle',
+    parentSessionId: parent,
+    isSidechain: sidechain,
+    transcriptPath: filePath,
+    files: extractFiles(records),
+  };
+}
+
+class ClaudeCodeProvider extends EventEmitter {
+  constructor(options = {}) {
+    super();
+    this.command = options.command || 'claude';
+    this.home = options.home || os.homedir();
+    this.claudeDir = options.claudeDir || path.join(this.home, '.claude');
+    this.projectsDir = options.projectsDir || path.join(this.claudeDir, 'projects');
+    this.spawn = options.spawn || defaultSpawn;
+    this.children = new Map();
+    this.capabilities = { archive: false, delete: false, rename: false, resume: true, start: true };
+  }
+
+  async listProjects() {
+    let entries;
+    try { entries = await fsp.readdir(this.projectsDir, { withFileTypes: true }); }
+    catch (error) {
+      if (error.code === 'ENOENT' || error.code === 'EACCES') return [];
+      throw error;
+    }
+    const projects = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const dir = path.join(this.projectsDir, entry.name);
+      const files = await findJsonLines(dir);
+      const sessions = [];
+      for (const file of files) {
+        const filePath = path.isAbsolute(file) ? file : path.join(dir, file);
+        const session = sessionFromRecords(filePath, await readJsonLines(filePath));
+        if (session) sessions.push(session);
+      }
+      if (!sessions.length) continue;
+      const cwd = sessions.find((s) => s.cwd)?.cwd || null;
+      projects.push({ id: entry.name, name: cwd ? path.basename(cwd) : entry.name, cwd, sessions });
+    }
+    projects.sort((a, b) => (b.sessions[0]?.updatedAt || '').localeCompare(a.sessions[0]?.updatedAt || ''));
+    return projects;
+  }
+
+  async listSessions(options = {}) {
+    const projects = await this.listProjects();
+    let sessions = projects.flatMap((project) => project.sessions);
+    if (options.cwd) sessions = sessions.filter((session) => session.cwd === options.cwd || session.cwd?.startsWith(`${options.cwd}${path.sep}`));
+    return sessions.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+  }
+
+  async readSession(sessionId) {
+    const sessions = await this.listSessions();
+    const session = sessions.find((item) => item.id === sessionId);
+    if (!session) throw new ClaudeCodeError(`Claude session not found: ${sessionId}`, { sessionId });
+    const records = await readJsonLines(session.transcriptPath);
+    return { ...session, records, messages: records.filter((r) => r.type === 'user' || r.type === 'assistant').map((r) => ({ id: r.uuid || null, role: r.type, text: recordText(r), timestamp: iso(r.timestamp), raw: r })), files: extractFiles(records) };
+  }
+
+  startSession({ cwd, prompt, name, model, sessionId, resume = false, extraArgs = [] } = {}) {
+    if (!cwd || !path.isAbsolute(cwd)) throw new ClaudeCodeError('A valid absolute cwd is required');
+    if (!prompt || typeof prompt !== 'string') throw new ClaudeCodeError('A non-empty prompt is required');
+    const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose'];
+    if (name) args.push('--name', name);
+    if (model) args.push('--model', model);
+    if (sessionId || resume) args.push('--resume', sessionId || '');
+    args.push(...extraArgs);
+    const child = this.spawn(this.command, args, { cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const handle = new EventEmitter();
+    handle.child = child;
+    handle.sessionId = sessionId || null;
+    let buffer = '';
+    const emitLines = (chunk) => {
+      buffer += String(chunk);
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let event;
+        try { event = JSON.parse(line); } catch { event = { type: 'text', text: line }; }
+        if (event.session_id) handle.sessionId = event.session_id;
+        handle.emit('event', event);
+        this.emit('event', { ...event, provider: 'claude', cwd, sessionId: handle.sessionId });
+      }
+    };
+    child.stdout.on('data', emitLines);
+    child.stderr.on('data', (chunk) => handle.emit('stderr', String(chunk)));
+    child.on('error', (error) => { handle.emit('error', error); this.emit('error', error); });
+    child.on('close', (code, signal) => { this.children.delete(handle.sessionId || child.pid); handle.emit('exit', { code, signal, sessionId: handle.sessionId }); this.emit('exit', { code, signal, sessionId: handle.sessionId }); });
+    this.children.set(handle.sessionId || child.pid, handle);
+    return handle;
+  }
+
+  resumeSession(sessionId, prompt, options = {}) { return this.startSession({ ...options, sessionId, prompt, resume: true }); }
+
+  async archiveSession() { throw new ClaudeCodeError('Claude Code has no supported archive API; session remains recoverable in local history', { capability: 'archive', supported: false }); }
+  async deleteSession() { throw new ClaudeCodeError('Claude Code session deletion is intentionally disabled; the provider is read-only for local history', { capability: 'delete', supported: false }); }
+}
+
+module.exports = { ClaudeCodeProvider, ClaudeCodeError, readJsonLines, sessionFromRecords, extractFiles };

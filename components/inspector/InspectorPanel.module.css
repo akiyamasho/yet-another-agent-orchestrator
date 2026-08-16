@@ -1,0 +1,496 @@
+.panel {
+    position: fixed;
+    z-index: 20;
+    inset: 0 0 0 auto;
+    width: min(460px, 100vw);
+    overflow: auto;
+    color: #e7edf8;
+    background: rgba(12, 15, 34, 0.97);
+    border-left: 1px solid rgba(148, 163, 184, 0.18);
+    box-shadow: -20px 0 60px rgba(0, 0, 0, 0.3);
+    font:
+        14px/1.45 system-ui,
+        sans-serif;
+    --accent: #67e8f9;
+}
+.header {
+    padding: 20px 22px 16px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+.context {
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+.dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px var(--accent);
+}
+.path {
+    color: #76839c;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 400;
+}
+.iconButton {
+    float: right;
+    border: 0;
+    background: none;
+    color: #9aa8c2;
+    padding: 4px;
+    cursor: pointer;
+}
+.key {
+    margin: 24px 0 3px;
+    color: #8c9ab3;
+    font:
+        600 11px ui-monospace,
+        monospace;
+}
+
+.provider {
+  display: inline-flex;
+  margin-right: 8px;
+  padding: 2px 6px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 9px;
+  letter-spacing: .12em;
+}
+
+.focusedPreview {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, #29303a);
+  border-radius: 10px;
+  background: #090b0f;
+}
+
+.focusedPreview > button { position: absolute; z-index: 1; top: 8px; right: 8px; }
+.focusedPreview img { display: block; width: 100%; max-height: 320px; object-fit: contain; background: #050609; }
+.focusedPreview > div { display: grid; gap: 4px; padding: 10px 12px; }
+.focusedPreview small { overflow: hidden; color: #7c8189; text-overflow: ellipsis; white-space: nowrap; }
+.focusedPreview > div button { justify-self: start; margin-top: 4px; }
+.header h2 {
+    margin: 0 0 12px;
+    font-size: 22px;
+    letter-spacing: -0.02em;
+}
+.meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 11px;
+    color: #8f9cb4;
+    font-size: 12px;
+}
+.meta span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.status {
+    color: #dbe7f4;
+    font-weight: 700;
+}
+.status i,
+.statusDot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    background: #94a3b8;
+}
+.running i,
+.running.statusDot {
+    background: #4ade80;
+    box-shadow: 0 0 9px #4ade80;
+}
+.waiting i,
+.waiting.statusDot {
+    background: #fbbf24;
+}
+.needs_attention i,
+.needs_attention.statusDot {
+    background: #fb7185;
+    box-shadow: 0 0 8px #fb7185;
+}
+.completed i,
+.completed.statusDot {
+    background: #67e8f9;
+}
+.failed i,
+.failed.statusDot {
+    background: #f87171;
+}
+.actions,
+.attentionActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 18px;
+}
+.actions button,
+.attentionActions button,
+.sectionHeading button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid #2c3850;
+    border-radius: 7px;
+    padding: 7px 10px;
+    color: #dce6f4;
+    background: #182238;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+}
+.actions button:hover,
+.attentionActions button:hover,
+.child:hover {
+    border-color: #63728c;
+    background: #202d47;
+}
+.primary {
+    background: var(--accent) !important;
+    border-color: var(--accent) !important;
+    color: #07111d !important;
+    font-weight: 750;
+}
+.danger,
+.reject {
+    color: #fda4af !important;
+}
+.attention {
+    margin: 16px 22px 0;
+    padding: 14px;
+    border: 1px solid rgba(251, 113, 133, 0.42);
+    border-radius: 10px;
+    background: rgba(127, 29, 54, 0.16);
+}
+.attentionTitle {
+    color: #fda4af;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 750;
+    margin-bottom: 9px;
+}
+.attention strong {
+    display: block;
+}
+.attention p {
+    margin: 4px 0;
+    color: #cad4e4;
+}
+.attention small {
+    color: #9eabc0;
+}
+.tabs {
+    display: flex;
+    padding: 0 22px;
+    gap: 18px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+.tabs button {
+    position: relative;
+    border: 0;
+    background: none;
+    color: #8492aa;
+    padding: 14px 0 11px;
+    cursor: pointer;
+    font: 600 12px inherit;
+}
+.tabs button b {
+    margin-left: 5px;
+    color: var(--accent);
+}
+.tabs .activeTab {
+    color: #f1f5fb;
+}
+.activeTab:after {
+    content: "";
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent);
+}
+.body {
+    padding: 20px 22px 40px;
+}
+.card,
+.placeholder {
+    padding: 15px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 10px;
+    background: rgba(26, 37, 60, 0.45);
+}
+.card label,
+.details dt {
+    color: #8190aa;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 10px;
+    font-weight: 750;
+}
+.card p {
+    color: #c9d4e4;
+    margin: 5px 0 16px;
+}
+.card p:last-child {
+    margin-bottom: 0;
+}
+.card .objective {
+    color: #eff5fc;
+    font-size: 15px;
+}
+.details {
+    margin: 18px 0;
+}
+.details div {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 11px 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+.details dd {
+    margin: 0;
+    text-align: right;
+    color: #d2ddec;
+    font-size: 12px;
+}
+.link {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    cursor: pointer;
+}
+.sectionHeading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+.sectionHeading h3 {
+    margin: 0;
+    font-size: 14px;
+}
+.child {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left;
+    color: #dbe4f1;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 8px;
+    background: #151f34;
+    padding: 11px;
+    cursor: pointer;
+    margin-bottom: 7px;
+}
+.child span:nth-child(2) {
+    flex: 1;
+    min-width: 0;
+}
+.child strong,
+.child small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.child small,
+.empty {
+    color: #8997ae;
+    font-size: 11px;
+    margin-top: 3px;
+}
+.empty {
+    padding: 22px 4px;
+    text-align: center;
+}
+.timeline article {
+    display: flex;
+    gap: 12px;
+    padding-bottom: 19px;
+}
+.eventDot {
+    flex: 0 0 8px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-top: 6px;
+    background: #8492aa;
+}
+.eventDot.approval {
+    background: #fbbf24;
+}
+.eventDot.error {
+    background: #fb7185;
+}
+.eventDot.tool {
+    background: #a78bfa;
+}
+.timeline strong {
+    font-size: 13px;
+}
+.timeline p {
+    color: #aebbd0;
+    margin: 3px 0;
+    font-size: 12px;
+}
+.timeline time {
+    color: #71809a;
+    font-size: 11px;
+}
+.placeholder {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 12px;
+    color: #9ba9bf;
+}
+.placeholder strong,
+.placeholder small {
+    display: block;
+}
+.placeholder small {
+    font-size: 11px;
+    margin-top: 3px;
+}
+@media (max-width: 560px) {
+    .panel {
+        width: 100vw;
+    }
+    .header,
+    .body {
+        padding-left: 17px;
+        padding-right: 17px;
+    }
+    .tabs {
+        padding: 0 17px;
+        gap: 14px;
+    }
+}
+
+/* Cinematic editorial theme shared with the director portfolio. */
+.panel {
+    color: var(--text);
+    border-color: var(--line);
+    background: rgba(4, 7, 10, 0.985);
+    box-shadow: -22px 0 70px rgba(0, 0, 0, 0.46);
+    font-family: "IBM Plex Sans", sans-serif;
+}
+.header { border-color: var(--line); }
+.context,
+.key,
+.meta,
+.tabs button,
+.card label,
+.details dt,
+.timeline time {
+    font-family: "IBM Plex Mono", monospace;
+    letter-spacing: 0.08em;
+}
+.context { color: var(--projector); font-size: 9px; text-transform: uppercase; }
+.dot { box-shadow: none; }
+.path,
+.key,
+.meta,
+.card label,
+.details dt,
+.timeline time { color: var(--quiet); }
+.header h2 {
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 32px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+.liveNotice {
+    margin-top: 12px !important;
+    padding-top: 10px;
+    border-top: 1px solid rgba(226, 184, 75, 0.24);
+    color: var(--muted) !important;
+    font: 400 10px/1.5 "IBM Plex Mono", monospace !important;
+}
+.transcript {
+    display: grid;
+    gap: 1px;
+    margin-top: 12px;
+    border: 1px solid var(--line);
+    background: var(--line);
+}
+.message {
+    padding: 13px 14px;
+    background: rgba(7, 10, 13, 0.98);
+}
+.message small {
+    display: block;
+    margin-bottom: 7px;
+    color: var(--gold);
+    font: 500 8px "IBM Plex Mono", monospace;
+    letter-spacing: 0.12em;
+}
+.message pre {
+    max-height: 260px;
+    margin: 0;
+    overflow: auto;
+    color: var(--muted);
+    font: 400 10px/1.55 "IBM Plex Mono", monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.actions button,
+.attentionActions button,
+.sectionHeading button {
+    border-radius: 0;
+    border-color: var(--line);
+    background: var(--surface-raised);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 9px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+.actions button:hover,
+.attentionActions button:hover,
+.child:hover { border-color: var(--projector); background: rgba(122, 167, 184, 0.08); }
+.primary { color: var(--canvas) !important; border-color: var(--gold) !important; background: var(--gold) !important; }
+.attention { border-radius: 0; border-color: rgba(226, 184, 75, 0.42); background: rgba(226, 184, 75, 0.07); }
+.attentionTitle { color: var(--gold); }
+.tabs { border-color: var(--line); }
+.tabs button { color: var(--quiet); font-size: 9px; text-transform: uppercase; }
+.tabs .activeTab { color: var(--text); }
+.activeTab::after { height: 1px; background: var(--projector); }
+.card,
+.placeholder,
+.child { border-radius: 0; border-color: var(--line); background: var(--surface-raised); }
+.card .objective { color: var(--text); }
+.card p,
+.details dd,
+.child { color: var(--muted); }
+.details div { border-color: var(--line); }
+.link { color: var(--projector); }
+.sectionHeading h3 {
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}

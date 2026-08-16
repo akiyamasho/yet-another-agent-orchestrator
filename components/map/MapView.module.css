@@ -1,0 +1,466 @@
+.canvas {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 520px;
+    overflow: hidden;
+    background: #070b1d;
+    color: #e7edff;
+    isolation: isolate;
+}
+.canvas :global(.react-flow) {
+    position: relative;
+    z-index: 2;
+}
+.canvas :global(.react-flow__controls) {
+    border: 1px solid rgba(153, 170, 220, 0.18);
+    background: rgba(11, 17, 40, 0.8);
+    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.25);
+}
+.canvas :global(.react-flow__controls-button) {
+    border-bottom: 1px solid rgba(153, 170, 220, 0.14);
+    background: transparent;
+    color: #aab8d8;
+}
+.canvas :global(.react-flow__controls-button:hover) {
+    background: rgba(112, 132, 208, 0.2);
+}
+.canvas :global(.react-flow__edge-path) {
+    filter: drop-shadow(0 0 5px var(--xy-edge-stroke));
+    transition: opacity 0.3s ease;
+}
+.folderNode,
+.threadNode {
+    font: inherit;
+    cursor: pointer;
+    border: 0;
+    color: #eef3ff;
+}
+.folderNode {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 180px;
+    min-height: 122px;
+    padding: 18px;
+    gap: 5px;
+    border-radius: 24px;
+    background: linear-gradient(
+        145deg,
+        rgba(25, 34, 70, 0.96),
+        rgba(12, 18, 42, 0.94)
+    );
+    border: 1px solid color-mix(in srgb, var(--accent) 65%, transparent);
+    box-shadow:
+        0 0 34px color-mix(in srgb, var(--accent) 16%, transparent),
+        inset 0 0 24px rgba(255, 255, 255, 0.025);
+}
+.folderNode:hover,
+.threadNode:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.16);
+}
+.folderOrbit {
+    position: absolute;
+    inset: -12px;
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    border-radius: 30px;
+    pointer-events: none;
+}
+.folderGlyph {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 14px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.folderNode strong {
+    font-size: 13px;
+    letter-spacing: -0.01em;
+}
+.folderNode small,
+.threadNode small {
+    color: #8d9aba;
+    font-size: 10px;
+}
+.providerCounts {
+    display: flex;
+    gap: 8px;
+    margin-top: 2px;
+    font: 9px/1 "IBM Plex Mono", monospace;
+    letter-spacing: 0.08em;
+}
+.codexMark { color: #7aa7b8; }
+.claudeMark { color: #d97757; }
+.threadNode {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 188px;
+    min-height: 56px;
+    padding: 8px 11px;
+    text-align: left;
+    border-radius: 15px;
+    background: rgba(14, 21, 48, 0.94);
+    border: 1px solid rgba(148, 163, 204, 0.17);
+    box-shadow: 0 9px 25px rgba(0, 0, 0, 0.22);
+    transition:
+        opacity 0.25s ease,
+        transform 0.2s ease,
+        filter 0.2s ease;
+}
+.threadCopy {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+.providerBadge {
+    display: grid;
+    place-items: center;
+    width: 17px;
+    height: 17px;
+    flex: 0 0 auto;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    font: 10px/1 "IBM Plex Mono", monospace;
+    font-weight: 700;
+    letter-spacing: 0;
+    background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.threadCopy strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 650;
+}
+.statusRing {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 25px;
+    height: 25px;
+    color: #aab6d0;
+    border: 1px solid #66738f;
+    border-radius: 50%;
+}
+.status_running .statusRing {
+    color: #67e8f9;
+    border-color: #67e8f9;
+    animation: spin 2.5s linear infinite;
+    box-shadow: 0 0 14px rgba(103, 232, 249, 0.26);
+}
+.status_waiting .statusRing {
+    color: #fbbf24;
+    border-color: #fbbf24;
+    box-shadow: 0 0 12px rgba(251, 191, 36, 0.2);
+}
+.status_needs_attention .statusRing {
+    color: #fb7185;
+    border: 2px double #fb7185;
+    box-shadow: 0 0 15px rgba(251, 113, 133, 0.35);
+}
+.status_completed .statusRing {
+    color: #6ee7b7;
+    border-color: #6ee7b7;
+}
+.status_failed .statusRing {
+    color: #f87171;
+    border-style: dashed;
+    border-color: #f87171;
+}
+.attentionBadge {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    margin-left: auto;
+    color: #220b12;
+    background: #fb7185;
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: 800;
+}
+.dimmed {
+    opacity: 0.28;
+}
+.hiddenHandle {
+    opacity: 0;
+    pointer-events: none;
+}
+.idleDot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #8490a7;
+}
+.atmosphere {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    opacity: 0.65;
+    background:
+        radial-gradient(
+            circle at 50% 48%,
+            rgba(66, 81, 174, 0.2),
+            transparent 27%
+        ),
+        radial-gradient(
+            circle at 14% 30%,
+            rgba(54, 137, 194, 0.1),
+            transparent 24%
+        ),
+        radial-gradient(
+            circle at 83% 75%,
+            rgba(154, 72, 168, 0.1),
+            transparent 26%
+        );
+}
+.atmosphere span {
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    border-radius: 50%;
+    background: #99b9ed;
+    box-shadow: 0 0 8px #99b9ed;
+    animation: drift 9s ease-in-out infinite alternate;
+}
+.atmosphere span:nth-child(1) {
+    left: 14%;
+    top: 18%;
+}
+.atmosphere span:nth-child(2) {
+    left: 73%;
+    top: 24%;
+    animation-delay: -2s;
+}
+.atmosphere span:nth-child(3) {
+    left: 37%;
+    top: 76%;
+    animation-delay: -4s;
+}
+.atmosphere span:nth-child(4) {
+    left: 89%;
+    top: 62%;
+    animation-delay: -6s;
+}
+.atmosphere span:nth-child(5) {
+    left: 57%;
+    top: 11%;
+    animation-delay: -1s;
+}
+.core {
+    position: absolute;
+    z-index: 1;
+    left: 50%;
+    top: 50%;
+    display: grid;
+    place-items: center;
+    gap: 5px;
+    transform: translate(-50%, -50%);
+    color: #7181c2;
+    pointer-events: none;
+    letter-spacing: 0.16em;
+    font-size: 8px;
+}
+.core span {
+    display: grid;
+    place-items: center;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    color: #b8c8ff;
+    background: radial-gradient(
+        circle,
+        rgba(117, 139, 255, 0.38),
+        rgba(47, 60, 130, 0.12) 65%,
+        transparent 70%
+    );
+    box-shadow: 0 0 52px rgba(102, 125, 255, 0.28);
+}
+.legend {
+    position: absolute;
+    z-index: 4;
+    right: 18px;
+    bottom: 18px;
+    display: flex;
+    gap: 14px;
+    padding: 9px 12px;
+    border: 1px solid rgba(153, 170, 220, 0.14);
+    border-radius: 10px;
+    background: rgba(10, 16, 36, 0.8);
+    color: #8190b2;
+    font-size: 10px;
+}
+.legend span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.legendLine {
+    width: 16px;
+    border-top: 1px solid #8294c4;
+}
+.legendDot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #7c88a5;
+}
+.legendDot.running {
+    background: #67e8f9;
+    box-shadow: 0 0 7px #67e8f9;
+}
+.legendDot.attention {
+    background: #fb7185;
+}
+.hints {
+    position: absolute;
+    z-index: 4;
+    left: 72px;
+    bottom: 20px;
+    color: #637191;
+    font-size: 10px;
+    pointer-events: none;
+}
+.minimap {
+    right: 18px !important;
+    bottom: 62px !important;
+    border: 1px solid rgba(153, 170, 220, 0.15);
+    background: rgba(10, 16, 36, 0.7) !important;
+}
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+@keyframes drift {
+    to {
+        transform: translate(20px, -13px);
+        opacity: 0.3;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .atmosphere span,
+    .status_running .statusRing {
+        animation: none;
+    }
+    .folderNode,
+    .threadNode,
+    .canvas :global(.react-flow__edge-path) {
+        transition: none;
+    }
+}
+@media (max-width: 700px) {
+    .legend {
+        right: 10px;
+        bottom: 10px;
+        gap: 8px;
+    }
+    .legend span:first-child,
+    .hints {
+        display: none;
+    }
+}
+
+/* Director-portfolio theme: cinematic charcoal, editorial type and restrained light. */
+.canvas {
+    color: var(--text);
+    background: var(--canvas);
+}
+.canvas :global(.react-flow__controls) {
+    border: 1px solid var(--line);
+    border-radius: 0;
+    background: rgba(4, 7, 10, 0.82);
+    box-shadow: none;
+}
+.canvas :global(.react-flow__controls-button) {
+    color: var(--muted);
+    border-color: var(--line);
+}
+.folderNode {
+    border-radius: 0;
+    border-color: color-mix(in srgb, var(--accent) 46%, var(--line));
+    background: rgba(16, 22, 27, 0.96);
+    box-shadow: 0 0 30px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.folderOrbit {
+    inset: -8px;
+    border-radius: 0;
+    opacity: 0.7;
+}
+.folderGlyph {
+    border-radius: 0;
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.folderNode strong {
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+.folderNode small,
+.threadNode small,
+.hints,
+.legend {
+    font-family: "IBM Plex Mono", monospace;
+    letter-spacing: 0.06em;
+}
+.threadNode {
+    border-radius: 0;
+    border-color: var(--line);
+    background: rgba(10, 15, 19, 0.96);
+    box-shadow: 0 9px 24px rgba(0, 0, 0, 0.32);
+}
+.threadNode {
+    border-color: color-mix(in srgb, var(--provider-color) 48%, var(--line));
+}
+.threadNode:hover {
+    border-color: var(--provider-color);
+}
+.threadCopy strong {
+    font-weight: 500;
+}
+.core {
+    color: var(--quiet);
+    font-family: "IBM Plex Mono", monospace;
+}
+.core span {
+    color: var(--projector);
+    background: radial-gradient(
+        circle,
+        rgba(122, 167, 184, 0.22),
+        rgba(93, 132, 146, 0.08) 62%,
+        transparent 70%
+    );
+    box-shadow: 0 0 44px rgba(122, 167, 184, 0.18);
+}
+.atmosphere {
+    opacity: 0.72;
+    background:
+        radial-gradient(
+            circle at 50% 48%,
+            rgba(93, 132, 146, 0.1),
+            transparent 27%
+        ),
+        linear-gradient(
+            90deg,
+            rgba(4, 7, 10, 0.72),
+            rgba(4, 7, 10, 0.05) 45%,
+            rgba(4, 7, 10, 0.5)
+        );
+}
+.legend {
+    border-radius: 0;
+    border-color: var(--line);
+    background: rgba(4, 7, 10, 0.82);
+    color: var(--quiet);
+}
+.minimap {
+    border-radius: 0;
+    border-color: var(--line);
+    background: rgba(4, 7, 10, 0.78) !important;
+}
