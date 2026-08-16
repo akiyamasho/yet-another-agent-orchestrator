@@ -11,7 +11,7 @@ No local web server is needed after installation.
 
 ![Provider-aware task list using synthetic data](docs/screenshots/constellation-demo-list.png)
 
-![Task inspector, subagent branch, and continuation composer using synthetic data](docs/screenshots/constellation-demo-inspector.png)
+![Provider-native Chat timeline, task inspector, and continuation composer using synthetic data](docs/screenshots/constellation-demo-inspector.png)
 
 ![Cross-project quick jump using synthetic data](docs/screenshots/constellation-demo-quick-jump.png)
 
@@ -28,8 +28,8 @@ No local web server is needed after installation.
 - Provider identity everywhere: Codex is projector blue; Claude Code is warm coral.
 - Real Codex task discovery, transcript reads, live notifications, start, rename, settings, archive, restore, and delete through `codex app-server`.
 - Real Claude Code project/session discovery, transcript reads, start, resume, and bounded subagent delegation through the local `claude` CLI.
-- Continue any selected main task or subagent in the inspector, with live provider transcript refresh, `Enter` to send, and local file/image attachments.
-- Provider-neutral task/plan state, messages, commands, changed files, and image artifacts.
+- Continue any selected main task or subagent in the **Chat** tab, with chronological provider-native transcript refresh, `Enter` to send, and local file/image attachments.
+- Inline Codex and Claude Code messages, reasoning/progress, plans, commands, tools, subagents, changed files, results, and image artifacts without flattening the conversation into a generic output list.
 - Secure in-app image thumbnails/enlarged previews and **Reveal in Finder** links.
 - Comfortable wide-screen typography plus 100%, 110%, and 120% interface scaling in Settings.
 - User-triggered GitHub Releases updates with exact-asset SHA-256 verification and staged rollback-safe replacement.
@@ -38,6 +38,8 @@ No local web server is needed after installation.
 ## Data-source honesty
 
 Codex uses the supported App Server protocol and never parses private Codex storage. Claude Code currently has no equivalent history server, so Constellation reads the user-owned local Claude JSONL history **read-only** and uses the official CLI for real new/resumed sessions.
+
+Codex App Server live state is scoped to the client process that owns a task. Constellation shows exact running/tool-stream state for tasks it starts or continues. For a task running in another Codex window, it syncs the persisted conversation through App Server and labels the runtime as external instead of claiming a false idle state; it never scrapes Codex's private logs to imitate the other client's event stream.
 
 Claude Code also has no supported single-session destructive-delete API. Its title, archive, and “Remove from Constellation” actions are explicit app-local overlays; the underlying Claude transcript remains untouched and resumable. Browser development mode uses clearly marked synthetic fixtures. Packaged Electron mode never silently swaps real provider data for dummy data.
 

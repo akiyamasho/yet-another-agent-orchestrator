@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { CodexAppServerBridge } = require("./codex/app-server-bridge.cjs");
 const { ClaudeCodeProvider } = require("./claude/provider.cjs");
+const { normalizeCodexTimeline, normalizeClaudeTimeline } = require("./chat/timeline.cjs");
 const { GitHubReleaseUpdater } = require("./updater/github-release-updater.cjs");
 
 const isMac = process.platform === "darwin";
@@ -13,6 +14,8 @@ let claudeProvider = null;
 let releaseUpdater = null;
 const recentEvents = [];
 const recentClaudeEvents = [];
+const codexRuntimeStatuses = new Map();
+const codexLiveItems = new Map();
 const allowedProjectRoots = new Set();
 const attachmentGrants = new Map();
 const MAX_ATTACHMENTS = 10;
@@ -192,6 +195,28 @@ function rememberNotification(message) {
   const params = message.params || {};
   const threadId = params.threadId || params.thread_id || params.thread?.id || params.turn?.threadId;
   if (threadId) {
+    if (message.method === "thread/status/changed" && params.status) codexRuntimeStatuses.set(String(threadId), params.status);
+    else if (message.method === "turn/started") codexRuntimeStatuses.set(String(threadId), { type: "active", activeFlags: [] });
+    else if (message.method === "turn/completed") codexRuntimeStatuses.set(String(threadId), { type: params.turn?.status === "failed" ? "systemError" : "idle" });
+    const live = codexLiveItems.get(String(threadId)) || new Map();
+    const incoming = params.item;
+    if ((message.method === "item/started" || message.method === "item/completed") && incoming?.id) live.set(String(incoming.id), { ...incoming, turnId: params.turnId || incoming.turnId });
+    else if (params.itemId && message.method === "item/agentMessage/delta") {
+      const previous = live.get(String(params.itemId)) || { id: params.itemId, type: "agentMessage", turnId: params.turnId, text: "" };
+      live.set(String(params.itemId), { ...previous, text: `${previous.text || ""}${params.delta || ""}` });
+    } else if (params.itemId && message.method === "item/commandExecution/outputDelta") {
+      const previous = live.get(String(params.itemId)) || { id: params.itemId, type: "commandExecution", turnId: params.turnId, aggregatedOutput: "", status: "inProgress" };
+      live.set(String(params.itemId), { ...previous, aggregatedOutput: `${previous.aggregatedOutput || ""}${params.delta || ""}` });
+    } else if (params.itemId && message.method === "item/reasoning/summaryTextDelta") {
+      const previous = live.get(String(params.itemId)) || { id: params.itemId, type: "reasoning", turnId: params.turnId, summary: [], status: "inProgress" };
+      const summary = Array.isArray(previous.summary) ? [...previous.summary] : [];
+      summary[Number(params.summaryIndex) || 0] = `${summary[Number(params.summaryIndex) || 0] || ""}${params.delta || ""}`;
+      live.set(String(params.itemId), { ...previous, summary });
+    }
+    if (live.size) {
+      while (live.size > 300) live.delete(live.keys().next().value);
+      codexLiveItems.set(String(threadId), live);
+    }
     recentEvents.unshift({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       threadId,
@@ -270,10 +295,16 @@ async function snapshot() {
     limit: 200,
     sortKey: "recency_at",
     sortDirection: "desc",
+    // Fast inventory path: selected Chat views use thread/read for repaired,
+    // full history while live status is overlaid from this process's events.
     useStateDbOnly: true,
     sourceKinds: ["cli", "vscode", "exec", "appServer", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "unknown"],
   });
-  threads.forEach((thread) => rememberProjectRoot(thread.cwd));
+  threads.forEach((thread) => {
+    rememberProjectRoot(thread.cwd);
+    const runtime = codexRuntimeStatuses.get(String(thread.id));
+    if (runtime) thread.status = runtime;
+  });
   readProjects().forEach(rememberProjectRoot);
   return { connected: true, threads, events: recentEvents, projects: readProjects() };
 }
@@ -371,7 +402,21 @@ function registerIpc() {
     return result.filePaths.slice(0, MAX_ATTACHMENTS).map(grantAttachment);
   });
   ipcMain.handle("codex:snapshot", () => snapshot());
-  ipcMain.handle("codex:read-thread", async (_event, threadId) => (await ensureCodex()).readThread(String(threadId), { includeTurns: true }));
+  ipcMain.handle("codex:read-thread", async (_event, threadId) => {
+    const raw = await (await ensureCodex()).readThread(String(threadId), { includeTurns: true });
+    const live = [...(codexLiveItems.get(String(threadId))?.values() || [])];
+    const sourceThread = raw?.thread || raw || {};
+    const liveByTurn = new Map();
+    live.forEach((item) => { const turnId = String(item.turnId || "live"); const turn = liveByTurn.get(turnId) || { id: turnId, status: "inProgress", items: [] }; turn.items.push(item); liveByTurn.set(turnId, turn); });
+    const timeline = normalizeCodexTimeline({ thread: { ...sourceThread, turns: [...(sourceThread.turns || []), ...liveByTurn.values()] } });
+    const runtime = codexRuntimeStatuses.get(String(threadId));
+    if (runtime) {
+      timeline.sourceStatus = runtime.type || runtime.status || timeline.sourceStatus;
+      timeline.status = runtime.activeFlags?.some((flag) => flag === "waitingOnApproval" || flag === "waitingOnUserInput") ? "needs_attention" : runtime.type === "active" ? "running" : runtime.type === "systemError" ? "failed" : timeline.status;
+      timeline.externalRuntime = false;
+    }
+    return timeline;
+  });
   ipcMain.handle("codex:continue-thread", (_event, input) => continueCodex(input));
   ipcMain.handle("codex:start-thread", async (_event, input) => {
     const bridge = await ensureCodex();
@@ -413,7 +458,7 @@ function registerIpc() {
   ipcMain.handle("codex:unarchive-thread", async (_event, threadId) => (await ensureCodex()).unarchiveThread(String(threadId)));
   ipcMain.handle("codex:delete-thread", async (_event, threadId) => (await ensureCodex()).deleteThread(String(threadId)));
   ipcMain.handle("claude:snapshot", () => claudeSnapshot());
-  ipcMain.handle("claude:read-session", (_event, sessionId) => ensureClaude().readSession(String(sessionId)));
+  ipcMain.handle("claude:read-session", async (_event, sessionId) => normalizeClaudeTimeline(await ensureClaude().readSession(String(sessionId))));
   ipcMain.handle("claude:continue-session", (_event, input) => startClaude({ ...input, objective: input.message }, true));
   ipcMain.handle("claude:start-session", (_event, input) => startClaude(input, false));
   ipcMain.handle("claude:start-subagent", (_event, input) => startClaude({ ...input, sessionId: input.parentSessionId, objective: `Delegate this bounded task to a Claude Code subagent and track it to completion:\n\n${input.title?.trim() ? `${input.title.trim()}: ` : ""}${input.objective.trim()}` }, true));

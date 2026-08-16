@@ -27,6 +27,7 @@ type Store = NormalizedState & {
   setStatusFilter: (status?: ThreadStatus) => void;
   setConnection: (status: ConnectionStatus, error?: string) => void;
   setProviderConnection: (provider: AgentProvider, status: ConnectionStatus) => void;
+  setThreadRuntimeStatus: (id: string, status: ThreadStatus) => void;
   syncFromSource: () => Promise<void>;
   createFolder: (input: CreateFolderInput) => Promise<FolderContext>;
   createThread: (input: CreateThreadInput) => Promise<AgentThread>;
@@ -71,6 +72,7 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
   setStatusFilter: (statusFilter) => set({ statusFilter }),
   setConnection: (connectionStatus, connectionError) => set({ connectionStatus, connectionError }),
   setProviderConnection: (provider, status) => set((state) => ({ providerConnections: { ...state.providerConnections, [provider]: status } })),
+  setThreadRuntimeStatus: (threadId, status) => set((state) => state.threads[threadId] ? ({ threads: { ...state.threads, [threadId]: { ...state.threads[threadId], status } } }) : state),
   syncFromSource: async () => {
     if (syncInFlight) return syncInFlight;
     syncInFlight = (async () => {

@@ -64,6 +64,8 @@ test('starts a persistent named stream and emits parsed events', async () => {
   assert.deepEqual(spawned.args.slice(0, 7), ['-p', 'Do the task', '--output-format', 'stream-json', '--verbose', '--name', 'Demo task']);
   assert.equal(event.session_id, 'new-1');
   assert.equal(handle.sessionId, 'new-1');
+  assert.equal(provider.runtimeStatuses.get('new-1'), 'running');
+  assert.equal(provider.liveRecords.get('new-1').length, 1);
 });
 
 test('resumes the exact Claude session and forwards attachment directory grants', () => {

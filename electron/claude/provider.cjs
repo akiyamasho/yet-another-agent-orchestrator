@@ -134,6 +134,8 @@ class ClaudeCodeProvider extends EventEmitter {
     this.projectsDir = options.projectsDir || path.join(this.claudeDir, 'projects');
     this.spawn = options.spawn || defaultSpawn;
     this.children = new Map();
+    this.runtimeStatuses = new Map();
+    this.liveRecords = new Map();
     this.capabilities = { archive: false, delete: false, rename: false, resume: true, start: true };
   }
 
@@ -167,6 +169,7 @@ class ClaudeCodeProvider extends EventEmitter {
     const projects = await this.listProjects();
     let sessions = projects.flatMap((project) => project.sessions);
     if (options.cwd) sessions = sessions.filter((session) => session.cwd === options.cwd || session.cwd?.startsWith(`${options.cwd}${path.sep}`));
+    sessions = sessions.map((session) => ({ ...session, runtimeStatus: this.runtimeStatuses.get(session.id) || session.status, status: this.runtimeStatuses.get(session.id) || session.status }));
     return sessions.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
   }
 
@@ -174,8 +177,12 @@ class ClaudeCodeProvider extends EventEmitter {
     const sessions = await this.listSessions();
     const session = sessions.find((item) => item.id === sessionId);
     if (!session) throw new ClaudeCodeError(`Claude session not found: ${sessionId}`, { sessionId });
-    const records = await readJsonLines(session.transcriptPath);
-    return { ...session, records, messages: records.filter((r) => r.type === 'user' || r.type === 'assistant').map((r) => ({ id: r.uuid || null, role: r.type, text: recordText(r), timestamp: iso(r.timestamp), raw: r })), files: extractFiles(records) };
+    const stored = await readJsonLines(session.transcriptPath);
+    const merged = new Map();
+    stored.forEach((record, index) => merged.set(String(record.uuid || record.message?.id || `stored-${index}`), record));
+    (this.liveRecords.get(sessionId) || []).forEach((record, index) => merged.set(String(record.uuid || record.message?.id || `live-${index}`), record));
+    const records = [...merged.values()].sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')));
+    return { ...session, runtimeStatus: this.runtimeStatuses.get(sessionId) || session.runtimeStatus || session.status, records, messages: records.filter((r) => r.type === 'user' || r.type === 'assistant').map((r) => ({ id: r.uuid || null, role: r.type, text: recordText(r), timestamp: iso(r.timestamp), raw: r })), files: extractFiles(records) };
   }
 
   startSession({ cwd, prompt, name, model, sessionId, resume = false, extraArgs = [] } = {}) {
@@ -190,6 +197,7 @@ class ClaudeCodeProvider extends EventEmitter {
     const handle = new EventEmitter();
     handle.child = child;
     handle.sessionId = sessionId || null;
+    if (sessionId) this.runtimeStatuses.set(sessionId, 'running');
     let buffer = '';
     const emitLines = (chunk) => {
       buffer += String(chunk);
@@ -200,14 +208,22 @@ class ClaudeCodeProvider extends EventEmitter {
         let event;
         try { event = JSON.parse(line); } catch { event = { type: 'text', text: line }; }
         if (event.session_id) handle.sessionId = event.session_id;
+        if (handle.sessionId) {
+          const failed = event.type === 'result' && (/error|fail/.test(String(event.subtype || '').toLowerCase()) || event.is_error === true);
+          this.runtimeStatuses.set(handle.sessionId, event.type === 'result' ? (failed ? 'failed' : 'completed') : 'running');
+          const records = this.liveRecords.get(handle.sessionId) || [];
+          records.push(event);
+          if (records.length > 300) records.splice(0, records.length - 300);
+          this.liveRecords.set(handle.sessionId, records);
+        }
         handle.emit('event', event);
         this.emit('event', { ...event, provider: 'claude', cwd, sessionId: handle.sessionId });
       }
     };
     child.stdout.on('data', emitLines);
     child.stderr.on('data', (chunk) => handle.emit('stderr', String(chunk)));
-    child.on('error', (error) => { handle.emit('error', error); this.emit('error', error); });
-    child.on('close', (code, signal) => { this.children.delete(handle.sessionId || child.pid); handle.emit('exit', { code, signal, sessionId: handle.sessionId }); this.emit('exit', { code, signal, sessionId: handle.sessionId }); });
+    child.on('error', (error) => { if (handle.sessionId) this.runtimeStatuses.set(handle.sessionId, 'failed'); handle.emit('error', error); this.emit('error', error); });
+    child.on('close', (code, signal) => { if (handle.sessionId && this.runtimeStatuses.get(handle.sessionId) === 'running') this.runtimeStatuses.set(handle.sessionId, code === 0 ? 'completed' : 'failed'); this.children.delete(handle.sessionId || child.pid); handle.emit('exit', { code, signal, sessionId: handle.sessionId }); this.emit('exit', { code, signal, sessionId: handle.sessionId }); });
     this.children.set(handle.sessionId || child.pid, handle);
     return handle;
   }

@@ -207,8 +207,9 @@ Tabs:
 3. `Activity`
    - Chronological event stream with filters: messages, tools, files, approvals, errors.
    - Parent/child indentation and timestamps.
-4. `Output`
-   - Provider transcript messages, task/plan state, command output, changed files, summaries, test results, and final response.
+4. `Chat`
+   - A chronological, provider-native conversation: user and assistant messages remain primary while reasoning/progress, plans, command runs, web/tool calls, subagent activity, changed files, test results, and final responses stay inline and collapsible.
+   - Codex App Server `turn/*` and `item/*` events and Claude Code stream-json records are adapted separately into the shared timeline; neither provider is flattened into a generic artifact list.
    - Local image artifacts render as in-app thumbnails and an enlarged preview.
    - Every verified local artifact has a `Reveal in Finder` action. Relative paths resolve against the task’s recorded project `cwd`.
 
@@ -221,6 +222,7 @@ File access is mediated by narrow Electron IPC. The renderer cannot read arbitra
 - Codex resumes the exact provider thread. If the latest turn is active, Constellation uses `turn/steer` with its expected turn id; otherwise it starts a new turn. Images are sent as App Server `localImage` input items, while other files are supplied as canonical project paths in the text input.
 - Claude Code resumes the exact session with `claude -p --resume <session-id>`. Attachments use explicit `@path` references and `--add-dir` grants when a selected file is outside the task cwd.
 - Sending never creates a renderer-only continuation. The transcript refreshes from the provider source of truth and continues updating from live notifications.
+- Runtime truth is process-scoped. Tasks started or continued by Constellation have exact live status and streamed tool activity. A task active in another Codex client still syncs its persisted App Server conversation, but that other process's in-memory stop/running signal and unpersisted events are labeled as externally synced rather than guessed as idle or duplicated from private storage.
 
 Attention state:
 
