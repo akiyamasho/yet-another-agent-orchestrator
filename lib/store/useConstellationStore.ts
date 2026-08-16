@@ -76,7 +76,7 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
     syncInFlight = (async () => {
       const desktop = window.constellationDesktop;
       if (!desktop) {
-        set({ ...mockState, connectionStatus: "demo", connectionError: undefined, lastSyncedAt: new Date().toISOString() });
+        set({ ...mockState, connectionStatus: "demo", providerConnections: { codex: "demo", claude: "demo" }, connectionError: undefined, lastSyncedAt: new Date().toISOString() });
         return;
       }
       if (!Object.keys(get().threads).length) set({ connectionStatus: "loading", connectionError: undefined });
