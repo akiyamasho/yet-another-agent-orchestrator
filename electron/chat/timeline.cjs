@@ -16,6 +16,25 @@ function contentText(value) {
     contentText(value.summary) || contentText(value.message?.content);
 }
 
+// Reasoning is intentionally limited to provider fields that are explicitly
+// readable summaries/content. Do not stringify the whole event: Codex may
+// include encrypted or otherwise non-displayable reasoning alongside these.
+function reasoningText(item) {
+  if (!item || typeof item !== 'object') return '';
+  const fields = [
+    item.summary,
+    item.summaryText,
+    item.summary_text,
+    item.content,
+    item.text,
+  ];
+  for (const value of fields) {
+    const text = contentText(value).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
 function compact(value, limit = 6000) {
   const text = contentText(value).trim();
   if (text) return text.slice(0, limit);
@@ -51,7 +70,12 @@ function codexItem(item, turn, index) {
   };
   if (rawType === 'userMessage') return { ...base, kind: 'message', role: 'user', text: contentText(item.content) };
   if (rawType === 'agentMessage') return { ...base, kind: 'message', role: 'assistant', text: scalarText(item.text) || contentText(item.content), phase: item.phase };
-  if (rawType === 'reasoning') return { ...base, kind: 'reasoning', label: 'Reasoning', text: contentText(item.summary) || contentText(item.content) };
+  if (rawType === 'reasoning') return {
+    ...base,
+    kind: 'reasoning',
+    label: 'Reasoning',
+    text: reasoningText(item) || 'No readable reasoning summary was provided by the runtime.',
+  };
   if (rawType === 'plan') return { ...base, kind: 'plan', label: 'Plan', text: scalarText(item.text) || compact(item.plan) };
   if (rawType === 'commandExecution') return { ...base, kind: 'tool', label: 'Ran command', title: scalarText(item.command), text: scalarText(item.aggregatedOutput), exitCode: item.exitCode, durationMs: item.durationMs };
   if (rawType === 'fileChange') {

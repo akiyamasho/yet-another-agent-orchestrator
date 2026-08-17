@@ -7,15 +7,24 @@
 .attachment small { margin-top: 2px; color: var(--quiet); font: 9px var(--font-mono); }
 .attachment button { padding: 2px; color: var(--quiet); border: 0; background: transparent; cursor: pointer; }
 .inputRow { min-width: 0; display: grid; grid-template-columns: 38px minmax(0, 1fr) 42px; align-items: stretch; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line)); background: #080c0f; }
+.inputRow.running { grid-template-columns: 38px minmax(0, 1fr) 42px 42px; }
 .inputRow textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 58px; max-height: 160px; resize: vertical; padding: 11px 8px; color: var(--text); border: 0; outline: 0; background: transparent; font: 13px/1.5 var(--font-body); overflow-wrap: anywhere; word-break: break-word; }
 .inputRow textarea::placeholder { color: #6f7b81; }
 .attachButton, .sendButton { display: grid; place-items: center; margin: 0; padding: 0; border: 0; background: transparent; cursor: pointer; }
 .attachButton { color: var(--muted); border-right: 1px solid var(--line); }
 .sendButton { color: var(--canvas); background: var(--gold); }
+.cancelButton { display: grid; place-items: center; color: #f2aaa3; background: rgba(181, 77, 67, .16); border: 0; border-left: 1px solid var(--line); cursor: pointer; }
 .attachButton:hover:not(:disabled) { color: var(--projector); }
 .sendButton:hover:not(:disabled) { filter: brightness(1.08); }
+.cancelButton:hover:not(:disabled) { color: #ffd6d1; background: rgba(181, 77, 67, .3); }
 .attachButton:disabled, .sendButton:disabled { cursor: not-allowed; opacity: .34; }
+.cancelButton:disabled { cursor: not-allowed; opacity: .5; }
 .footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 7px; color: var(--quiet); font: 9px/1.35 var(--font-mono); letter-spacing: .03em; }
+.composerMeta { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 28px; margin-top: 8px; }
+.modelPicker { display: inline-flex; align-items: center; gap: 8px; color: var(--quiet); font: 9px var(--font-mono); letter-spacing: .08em; }
+.modelPicker select { min-width: 148px; padding: 5px 24px 5px 8px; color: var(--muted); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--material-2); font: 10px var(--font-mono); cursor: pointer; }
+.modelPicker select:disabled { cursor: not-allowed; opacity: .55; }
+.modelLock { color: #c9958f; font: 9px var(--font-mono); }
 .footer kbd { color: var(--muted); font: inherit; }
 .error, .notice { max-width: 100%; margin: 8px 0 0; font: 10px/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .error { color: #e58d83; }
@@ -31,9 +40,9 @@
 .attachment:active { transform: scale(.985); }
 .inputRow { border-radius: var(--radius-md); border-color: var(--line-strong); background: var(--material-3); box-shadow: 0 8px 24px rgba(0, 0, 0, .22); }
 .inputRow:focus-within { border-color: var(--projector, #7aa7b8); box-shadow: 0 0 0 2px color-mix(in srgb, var(--projector, #7aa7b8) 20%, transparent), 0 8px 24px rgba(0, 0, 0, .22); }
-.attachButton, .sendButton { transition: color 160ms var(--ease-spring), background 160ms var(--ease-spring), transform 120ms ease-out; }
-.attachButton:active:not(:disabled), .sendButton:active:not(:disabled) { transform: scale(.96); }
+.attachButton, .sendButton, .cancelButton { transition: color 160ms var(--ease-spring), background 160ms var(--ease-spring), transform 120ms ease-out; }
+.attachButton:active:not(:disabled), .sendButton:active:not(:disabled), .cancelButton:active:not(:disabled) { transform: scale(.96); }
 .sendButton { border-radius: 0 var(--radius-md) var(--radius-md) 0; }
 .footer { font-family: var(--font-mono); }
 @media (prefers-reduced-transparency: reduce) { .attachment, .inputRow { background: #0b1014; box-shadow: none; } }
-@media (prefers-contrast: more) { .inputRow, .attachment { border-color: #e1edf2; } }
+@media (prefers-contrast: more) { .inputRow, .attachment { border-color: #e1edf2; } .cancelButton { border-left-color: #e1edf2; } }

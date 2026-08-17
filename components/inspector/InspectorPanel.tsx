@@ -7,6 +7,7 @@ import { ThreadComposer } from "@/components/inspector/ThreadComposer";
 import { providerMeta, splitProviderThreadId } from "@/lib/providers";
 import { useConstellationStore } from "@/lib/store/useConstellationStore";
 import type { ThreadStatus } from "@/lib/types";
+import { classifyLiveness, formatLivenessNotice } from "@/lib/runtime/liveness";
 import styles from "./InspectorPanel.module.css";
 
 type InspectorTab = "overview" | "subagents" | "activity" | "chat";
@@ -16,15 +17,24 @@ const formatTime = (iso?: string) => iso ? new Intl.DateTimeFormat(undefined, { 
 export interface InspectorPanelProps { threadId?: string; isMapView?: boolean; onBackToNow?: () => void; onClose?: () => void; onAddSubagent?: (threadId: string) => void; onEdit?: (threadId: string) => void; onArchive?: (threadId: string) => void; onDelete?: (threadId: string) => void; }
 
 export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAddSubagent, onEdit, onArchive, onDelete }: InspectorPanelProps) {
-  const [tab, setTab] = useState<InspectorTab>("overview");
+  const [tab, setTab] = useState<InspectorTab>("chat");
   const [attentionDone, setAttentionDone] = useState(false);
   const [detail, setDetail] = useState<unknown>();
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string>();
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [focusedPreview, setFocusedPreview] = useState<{ path: string; dataUrl: string; name: string }>();
+  const previewRequests = useRef(new Set<string>());
   const activeRequest = useRef<symbol | undefined>(undefined);
   const detailRevision = useRef("");
+  const lastNotificationRefresh = useRef(0);
+  const notificationTimer = useRef<number | undefined>(undefined);
+  const notificationPending = useRef(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const chatOutputRef = useRef<HTMLElement>(null);
+  const scrollFrame = useRef<number | undefined>(undefined);
+  const pinnedToBottom = useRef(true);
+  const [cancelRequest, setCancelRequest] = useState(0);
   const selectedThreadId = useConstellationStore((s) => threadId ?? s.selectedThreadId);
   const thread = useConstellationStore((s) => selectedThreadId ? s.threads[selectedThreadId] : undefined);
   const folder = useConstellationStore((s) => thread ? s.folders[thread.folderId] : undefined);
@@ -38,6 +48,14 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
   const threadProvider = thread?.provider ?? "codex";
   const children = useMemo(() => thread ? Object.values(threads).filter((item) => item.parentId === thread.id && !item.archived) : [], [thread, threads]);
   const activity = useMemo(() => thread ? Object.values(events).filter((event) => event.threadId === thread.id).sort((a, b) => b.timestamp.localeCompare(a.timestamp)) : [], [thread, events]);
+
+  // Every agent selection is a fresh inspection session. Keep Chat as the
+  // landing tab even when the previous agent was left on Overview, Subagents,
+  // or Activity (including immediately after creating a new agent).
+  useEffect(() => {
+    if (selectedThreadId) setTab("chat");
+  }, [selectedThreadId]);
+
   const timeline = useMemo(() => {
     const source = detail && typeof detail === "object" && "items" in detail && Array.isArray((detail as ChatTimeline).items) ? detail as ChatTimeline : connectionStatus === "demo" && thread ? demoTimeline(thread.provider ?? "codex", thread.id, thread.status) : undefined;
     if (!source) return undefined;
@@ -52,6 +70,8 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
     if (focus) setFocusedPreview({ path: resolved, dataUrl: preview.dataUrl, name: preview.name });
   }, [folder?.path]);
   const reveal = useCallback(async (filePath: string) => { await window.constellationDesktop?.files.reveal(projectPath(folder?.path, filePath)); }, [folder?.path]);
+  const handlePreview = useCallback((filePath: string) => { void loadPreview(filePath, true); }, [loadPreview]);
+  const handleReveal = useCallback((filePath: string) => { void reveal(filePath); }, [reveal]);
 
   const applyDetail = useCallback((response: unknown) => {
     const revision = timelineRevision(response);
@@ -95,10 +115,28 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
   useEffect(() => {
     const desktop = window.constellationDesktop;
     if (tab !== "chat" || !desktop || !selectedThreadId) return;
-    let timer: number | undefined;
-    const schedule = () => { window.clearTimeout(timer); timer = window.setTimeout(() => void refreshDetail(false), 750); };
+    window.clearTimeout(notificationTimer.current);
+    notificationTimer.current = undefined;
+    notificationPending.current = false;
+    lastNotificationRefresh.current = 0;
+    const schedule = () => {
+      notificationPending.current = true;
+      if (notificationTimer.current !== undefined) return;
+      const elapsed = Date.now() - lastNotificationRefresh.current;
+      // Notifications can arrive for every streamed token/tool event. Keep one
+      // refresh queued and cap the cadence so the chat remains interactive.
+      notificationTimer.current = window.setTimeout(async () => {
+        notificationTimer.current = undefined;
+        notificationPending.current = false;
+        lastNotificationRefresh.current = Date.now();
+        await refreshDetail(false);
+        // If events arrived while the request was in flight, schedule one
+        // trailing refresh instead of starving a continuous stream.
+        if (notificationPending.current) schedule();
+      }, Math.max(300, 900 - elapsed));
+    };
     const remove = threadProvider === "claude" ? desktop.claude.onNotification(schedule) : desktop.codex.onNotification(schedule);
-    return () => { window.clearTimeout(timer); remove(); };
+    return () => { window.clearTimeout(notificationTimer.current); notificationTimer.current = undefined; notificationPending.current = false; remove(); };
   }, [refreshDetail, selectedThreadId, tab, threadProvider]);
 
   useEffect(() => {
@@ -119,7 +157,10 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
     if (tab !== "chat" || !window.constellationDesktop) return;
     timeline?.items.filter((item) => item.kind === "image" && item.path).slice(-8).forEach((item) => {
       const resolved = projectPath(folder?.path, item.path!);
-      if (!previews[resolved]) void loadPreview(resolved, false).catch(() => undefined);
+      if (!previews[resolved] && !previewRequests.current.has(resolved)) {
+        previewRequests.current.add(resolved);
+        void loadPreview(resolved, false).catch(() => undefined).finally(() => previewRequests.current.delete(resolved));
+      }
     });
   }, [folder?.path, loadPreview, previews, tab, timeline]);
 
@@ -130,35 +171,99 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
     window.setTimeout(() => void refreshDetail(false), 450);
     window.setTimeout(() => void refreshDetail(false), 1600);
   }, [refreshDetail, selectedThreadId, setThreadRuntimeStatus, syncFromSource]);
+  const handleComposerCancelled = useCallback(async () => {
+    if (!selectedThreadId) return;
+    setThreadRuntimeStatus(selectedThreadId, "waiting");
+    await syncFromSource();
+    window.setTimeout(() => void refreshDetail(false), 450);
+  }, [refreshDetail, selectedThreadId, setThreadRuntimeStatus, syncFromSource]);
+
+  const scheduleScrollToBottom = useCallback((force = false) => {
+    if (!force && !pinnedToBottom.current) return;
+    if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = undefined;
+      const body = bodyRef.current;
+      if (body && (force || pinnedToBottom.current)) body.scrollTop = body.scrollHeight;
+    });
+  }, []);
+
+  const handleComposerRepin = useCallback(() => {
+    scheduleScrollToBottom(true);
+  }, [scheduleScrollToBottom]);
+
+  const handleInspectorKeyDownCapture = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Escape" || tab !== "chat") return;
+    if (focusedPreview) {
+      event.preventDefault();
+      event.stopPropagation();
+      setFocusedPreview(undefined);
+      return;
+    }
+    if (connectionStatus === "demo" || timeline?.status !== "running" || timeline.externalRuntime) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setCancelRequest((request) => request + 1);
+  }, [connectionStatus, focusedPreview, tab, timeline?.externalRuntime, timeline?.status]);
+
+  useEffect(() => () => {
+    if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current);
+  }, []);
+
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || tab !== "chat") return;
+    pinnedToBottom.current = true;
+    scheduleScrollToBottom(true);
+    const onScroll = () => {
+      pinnedToBottom.current = body.scrollHeight - body.clientHeight - body.scrollTop <= 48;
+    };
+    body.addEventListener("scroll", onScroll, { passive: true });
+    const output = chatOutputRef.current;
+    const observer = typeof ResizeObserver !== "undefined" && output
+      ? new ResizeObserver(() => scheduleScrollToBottom())
+      : undefined;
+    if (observer && output) observer.observe(output);
+    return () => {
+      body.removeEventListener("scroll", onScroll);
+      observer?.disconnect();
+    };
+  }, [scheduleScrollToBottom, selectedThreadId, tab]);
+
+  useEffect(() => {
+    if (tab === "chat") scheduleScrollToBottom();
+  }, [scheduleScrollToBottom, tab, timeline?.items.length, timeline?.updatedAt, focusedPreview]);
 
   if (!thread || !folder) return null;
   const live = connectionStatus !== "demo";
   const provider = providerMeta(thread.provider ?? "codex");
-  const displayedStatus = timeline?.inferredRuntime ? "Active externally" : timeline?.externalRuntime && thread.status === "idle" ? "Synced" : statusLabel[thread.status];
+  const liveness = classifyLiveness({ status: thread.status, thread, events: activity, timeline });
+  const displayedStatus = thread.status === "running" && liveness.state !== "active" ? (liveness.label || "Running") : timeline?.inferredRuntime ? "Active externally" : timeline?.externalRuntime && thread.status === "idle" ? "Synced" : statusLabel[thread.status];
   const action = (next: ThreadStatus) => void updateThread(thread.id, { status: next, summary: next === "running" ? "Resumed and working through the next bounded task." : next === "completed" ? "Marked complete." : thread.summary });
   const attention = thread.attention && !attentionDone;
 
-  return <aside className={styles.panel} aria-label={`Inspector for ${thread.title}`} style={{ "--accent": provider.color } as React.CSSProperties}>
+  return <aside className={styles.panel} aria-label={`Inspector for ${thread.title}`} style={{ "--accent": provider.color } as React.CSSProperties} onKeyDownCapture={handleInspectorKeyDownCapture}>
     <div className={styles.header}>
       <div className={styles.context}><span className={styles.dot} /> <span>{folder.name}</span><span className={styles.path}>{folder.path}</span></div>
       <button className={styles.iconButton} onClick={onClose} aria-label="Close inspector"><X size={17} /></button>
       <p className={styles.key}><span className={styles.provider} style={{ color: provider.color, borderColor: `${provider.color}66` }}>{provider.shortLabel}</span>{thread.key}</p><h2>{thread.title}</h2>
-      <div className={styles.meta}><span className={`${styles.status} ${styles[thread.status]}`}><i />{displayedStatus}</span><span><Clock3 size={13} /> {formatTime(thread.startedAt)}</span><span>{thread.model}</span><span>{thread.reasoningEffort}</span></div>
+      <div className={styles.meta}><span className={`${styles.status} ${styles[thread.status]} ${liveness.state === "possibly_stalled" ? styles.possiblyStalled : liveness.state === "quiet" ? styles.quiet : ""}`}><i />{displayedStatus}</span><span><Clock3 size={13} /> {formatTime(thread.startedAt)}</span><span>{thread.model}</span><span>{thread.reasoningEffort}</span></div>
+      {thread.status === "running" && liveness.state !== "active" && liveness.state !== "unknown" && <div className={`${styles.livenessNotice} ${liveness.state === "possibly_stalled" ? styles.stalledNotice : ""}`} role="status"><CircleAlert size={14}/><span><strong>{formatLivenessNotice(liveness)}</strong>. This may be a long-running command; inspect the original {provider.label} task if it needs attention.</span></div>}
       <div className={styles.actions}>
         {isMapView && onBackToNow && <button className={styles.primary} onClick={onBackToNow}><RotateCcw size={14}/> Back to Now</button>}
         {!live && (thread.status === "running" ? <><button onClick={() => action("waiting")}><Pause size={14}/> Pause</button><button className={styles.danger} onClick={() => action("idle")}><Square size={13}/> Stop</button></> : <button className={styles.primary} onClick={() => action("running")}><Play size={14}/> {thread.status === "waiting" ? "Resume" : "Run again"}</button>)}
-        <button onClick={() => onEdit?.(thread.id)}>Rename / edit</button><button onClick={() => onArchive?.(thread.id)}>Archive</button><button className={styles.danger} onClick={() => onDelete?.(thread.id)}>{thread.provider === "claude" ? "Remove" : "Delete"}</button>
+        <button onClick={() => onEdit?.(thread.id)}>Rename / edit</button><button onClick={() => onArchive?.(thread.id)}>Archive</button><button className={styles.danger} onClick={() => onDelete?.(thread.id)}>Delete permanently</button>
       </div>
     </div>
     {attention && <section className={styles.attention} aria-live="polite"><div className={styles.attentionTitle}><CircleAlert size={17}/> Action required</div><strong>{thread.attention?.kind === "approval" ? "Approval requested" : "Input needed"}</strong><p>{thread.attention?.message}</p><small>From {thread.title} · {thread.permission}</small>{live ? <p className={styles.liveNotice}>Respond in the original {provider.label} task. Constellation keeps this read-only until the provider reports the response.</p> : <div className={styles.attentionActions}><button className={styles.primary} onClick={() => setAttentionDone(true)}>Approve once</button><button onClick={() => setAttentionDone(true)}>Always allow…</button><button className={styles.reject} onClick={() => { setAttentionDone(true); action("failed"); }}>Reject</button></div>}</section>}
-    <nav className={styles.tabs} aria-label="Inspector sections">{(["overview", "subagents", "activity", "chat"] as InspectorTab[]).map((name) => <button key={name} className={tab === name ? styles.activeTab : ""} onClick={() => setTab(name)} aria-selected={tab === name} role="tab">{name[0].toUpperCase() + name.slice(1)}{name === "subagents" && children.length ? <b>{children.length}</b> : null}</button>)}</nav>
-    <div className={styles.body} role="tabpanel">
+    <nav className={styles.tabs} aria-label="Inspector sections">{(["chat", "overview", "subagents", "activity"] as InspectorTab[]).map((name) => <button key={name} className={tab === name ? styles.activeTab : ""} onClick={() => setTab(name)} aria-selected={tab === name} role="tab">{name[0].toUpperCase() + name.slice(1)}{name === "subagents" && children.length ? <b>{children.length}</b> : null}</button>)}</nav>
+    <div ref={bodyRef} className={styles.body} role="tabpanel">
       {tab === "overview" && <><section className={styles.card}><label>Objective</label><p className={styles.objective}>{thread.objective}</p><label>What it is doing now</label><p>{thread.summary}</p></section><dl className={styles.details}><div><dt>Provider</dt><dd style={{ color: provider.color }}>{provider.label}</dd></div><div><dt>Parent thread</dt><dd>{thread.parentId ? <button className={styles.link} onClick={() => selectThread(thread.parentId)}>{threads[thread.parentId]?.key ?? "Unknown"}<ChevronRight size={13}/></button> : "Root task"}</dd></div><div><dt>Permission mode</dt><dd>{thread.permission}</dd></div><div><dt>Branch / worktree</dt><dd>{thread.branch ?? "No branch"}</dd></div></dl></>}
       {tab === "subagents" && <section className={styles.listSection}><div className={styles.sectionHeading}><h3>Child threads</h3><button className={styles.primary} onClick={() => onAddSubagent?.(thread.id)}>Add subagent</button></div>{children.length ? children.map((child) => <button className={styles.child} key={child.id} onClick={() => selectThread(child.id)}><span className={`${styles.statusDot} ${styles[child.status]}`} /><span><strong>{child.title}</strong><small>{child.key} · {child.summary}</small></span><ChevronRight size={15}/></button>) : <p className={styles.empty}>No child threads yet. Add a bounded task to delegate through {provider.label}.</p>}</section>}
       {tab === "activity" && <section className={styles.timeline}>{activity.length ? activity.map((event) => <article key={event.id}><span className={`${styles.eventDot} ${styles[event.type]}`} /><div><strong>{event.title}</strong><p>{event.detail}</p><time>{formatTime(event.timestamp)}</time></div></article>) : <p className={styles.empty}>No activity recorded for this thread.</p>}</section>}
-      {tab === "chat" && <section className={styles.output}>{focusedPreview && <div className={styles.focusedPreview}><button onClick={() => setFocusedPreview(undefined)} aria-label="Close image preview"><X size={14}/></button><img src={focusedPreview.dataUrl} alt={focusedPreview.name}/><div><strong>{focusedPreview.name}</strong><small>{focusedPreview.path}</small><button onClick={() => void reveal(focusedPreview.path)}>Reveal in Finder</button></div></div>}<AgentChatTimeline timeline={timeline} provider={thread.provider ?? "codex"} loading={detailLoading} error={detailError} previews={previews} onPreview={(filePath) => void loadPreview(filePath, true)} onReveal={(filePath) => void reveal(filePath)} /></section>}
+      {tab === "chat" && <section ref={chatOutputRef} className={styles.output}>{focusedPreview && <div className={styles.focusedPreview}><button onClick={() => setFocusedPreview(undefined)} aria-label="Close image preview"><X size={14}/></button><img src={focusedPreview.dataUrl} alt={focusedPreview.name}/><div><strong>{focusedPreview.name}</strong><small>{focusedPreview.path}</small><button onClick={() => void reveal(focusedPreview.path)}>Reveal in Finder</button></div></div>}<AgentChatTimeline timeline={timeline} liveness={liveness} provider={thread.provider ?? "codex"} loading={detailLoading} error={detailError} previews={previews} onPreview={handlePreview} onReveal={handleReveal} /></section>}
     </div>
-    {tab === "chat" && <ThreadComposer thread={thread} cwd={folder.path} onSent={handleComposerSent} />}
+    {tab === "chat" && <ThreadComposer thread={thread} cwd={folder.path} onSent={handleComposerSent} onCancelled={handleComposerCancelled} cancelRequest={cancelRequest} running={Boolean(live && timeline?.status === "running" && !timeline.externalRuntime)} onRepin={handleComposerRepin} />}
   </aside>;
 }
 
@@ -172,6 +277,13 @@ function projectPath(cwd: string | undefined, filePath: string) {
 function timelineRevision(value: unknown) {
   if (!value || typeof value !== "object" || !("items" in value) || !Array.isArray((value as ChatTimeline).items)) return "";
   const timeline = value as ChatTimeline;
+  // Provider bridges expose updatedAt for streamed transcript snapshots. Use
+  // that stable marker first; hashing every transcript body on every provider
+  // notification made long chats compete with typing and scrolling.
+  if (timeline.updatedAt) {
+    const last = timeline.items[timeline.items.length - 1];
+    return [timeline.threadId, timeline.updatedAt, timeline.status, timeline.sourceStatus, timeline.externalRuntime, timeline.inferredRuntime, timeline.turnCount, timeline.items.length, last?.id, last?.status, last?.text?.length ?? 0, last?.detail?.length ?? 0].join("|");
+  }
   const items = timeline.items.map((item) => [
     item.id,
     item.status,

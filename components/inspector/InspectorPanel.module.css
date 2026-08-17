@@ -118,6 +118,14 @@
     background: #4ade80;
     box-shadow: 0 0 9px #4ade80;
 }
+.quiet,
+.possiblyStalled { color: #f0b84b !important; }
+.possiblyStalled { font-weight: 800; }
+.quiet i,
+.possiblyStalled i { background: #f0b84b; box-shadow: 0 0 8px rgba(240, 184, 75, .55); }
+.livenessNotice { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; padding: 9px 11px; border: 1px solid rgba(240, 184, 75, .3); border-radius: 8px; color: #e6c982; background: rgba(83, 58, 19, .18); font-size: 12px; line-height: 1.45; }
+.livenessNotice svg { flex: 0 0 auto; margin-top: 2px; }
+.stalledNotice { border-color: rgba(240, 184, 75, .6); background: rgba(83, 58, 19, .3); }
 .waiting i,
 .waiting.statusDot {
     background: #fbbf24;

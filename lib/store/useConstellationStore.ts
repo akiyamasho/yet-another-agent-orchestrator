@@ -59,6 +59,21 @@ function localArchive(state: Store, threadId: string, strategy: "tree" | "repare
   return threads;
 }
 
+function descendantThreadIds(state: Store, threadId: string) {
+  const ids = new Set<string>([threadId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    Object.values(state.threads).forEach((thread) => {
+      if (thread.parentId && ids.has(thread.parentId) && !ids.has(thread.id)) {
+        ids.add(thread.id);
+        changed = true;
+      }
+    });
+  }
+  return ids;
+}
+
 export const useConstellationStore = create<Store>()(persist((set, get) => ({
   ...emptyState,
   viewMode: "map",
@@ -179,8 +194,24 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
   },
   deleteThread: async (threadId) => {
     const desktop = window.constellationDesktop;
-    if (desktop) { const { provider, rawId } = splitProviderThreadId(threadId); if (provider === "claude") await desktop.claude.deleteSession(rawId); else await desktop.codex.deleteThread(rawId); await get().syncFromSource(); return; }
-    set((state) => { const threads = { ...state.threads }; delete threads[threadId]; return { threads }; });
+    if (desktop) {
+      const thread = get().threads[threadId];
+      if (!thread) return;
+      const { provider, rawId } = splitProviderThreadId(threadId);
+      if (provider === "claude") await desktop.claude.deleteSession(rawId);
+      else await desktop.codex.deleteThread(rawId);
+      await get().syncFromSource();
+      return;
+    }
+    set((state) => {
+      const ids = descendantThreadIds(state, threadId);
+      const threads = { ...state.threads };
+      const events = { ...state.events };
+      ids.forEach((id) => delete threads[id]);
+      Object.values(events).forEach((event) => { if (ids.has(event.threadId)) delete events[event.id]; });
+      const selectedThreadId = state.selectedThreadId && ids.has(state.selectedThreadId) ? undefined : state.selectedThreadId;
+      return { threads, events, selectedThreadId };
+    });
   },
   addEvent: (event) => set((state) => ({ events: { ...state.events, [event.id]: event } })),
   filteredThreads: () => {

@@ -67,7 +67,7 @@ Claude Code does not expose a Codex App Server-equivalent history API. Constella
 
 Starting a Claude task launches a real named CLI session in the selected folder. Adding a Claude subagent resumes the real parent session with a bounded delegation request; Constellation waits for the resulting provider history instead of inventing a renderer-only child. Models, effort, and permission mode are passed to the Claude CLI when supported.
 
-Claude Code has no supported single-session rename/archive/destructive-delete API. Constellation therefore stores only explicit presentation overlays in Electron `userData`: a display-title override, an archived flag, or a hidden-from-Constellation flag. “Remove” never claims to erase Claude history; the confirmation states that the original transcript remains untouched and resumable. This is intentionally distinct from Codex `thread/delete`.
+Claude Code has no supported single-session rename/archive/destructive-delete API. Constellation therefore stores only explicit presentation overlays in Electron `userData`: a display-title override and an archived flag. Archive and title changes never claim to erase Claude history; the original transcript remains untouched and resumable. Permanent deletion is a separate guarded flow, intentionally distinct from Codex `thread/delete`.
 
 ### 3.2 Operational UX patterns
 
@@ -164,7 +164,7 @@ The Map must make live state legible without relying on motion or color: provide
 
 - A quiet animated core in the center represents all local agent projects.
 - Folders are arranged radially around it, each with a labeled colored hub.
-- Main agents occupy a circular ring around the selected folder hub. Only the selected root expands its subagent descendants into an outward angular branch, preventing labels from colliding with the project name.
+- The overview shows folder hubs and main-agent roots only. Selecting one main agent expands only that root's subagent descendants into an outward angular branch, preventing labels from colliding with the project name or flooding the canvas.
 - Connectors are thin radial rays. Solid rays connect projects to main agents; lighter dashed rays connect subagents. There are no org-chart arrowheads or rectangular routing elbows.
 - Far zoom: folder hub, name, aggregate counts, status mixture.
 - Mid zoom: main agents, short task labels, state rings, immediate subagent count.
@@ -210,23 +210,23 @@ Header:
 
 Tabs:
 
-1. `Overview`
+1. `Chat`
+   - The default inspector tab: a chronological, provider-native conversation. User and assistant messages remain primary while reasoning/progress, plans, command runs, web/tool calls, subagent activity, changed files, test results, and final responses stay inline and collapsible.
+   - Codex App Server `turn/*` and `item/*` events and Claude Code stream-json records are adapted separately into the shared timeline; neither provider is flattened into a generic artifact list.
+   - Local image artifacts render as in-app thumbnails and an enlarged preview.
+   - Every verified local artifact has a `Reveal in Finder` action. Relative paths resolve against the task's recorded project `cwd`.
+2. `Overview`
    - Current objective and latest one-line progress summary.
    - Parent thread link, child count, branch/worktree, permission mode.
    - Compact “What it is doing now” card.
    - Primary actions based on state: `Open thread`, `Steer`, `Pause/Resume`, `Stop`.
-2. `Subagents`
+3. `Subagents`
    - Child threads in a nested list with status, model, elapsed time, and latest summary.
    - Select a child to refocus the map without closing the inspector.
    - `Add subagent` with a bounded-task composer.
-3. `Activity`
+4. `Activity`
    - Chronological event stream with filters: messages, tools, files, approvals, errors.
    - Parent/child indentation and timestamps.
-4. `Chat`
-   - A chronological, provider-native conversation: user and assistant messages remain primary while reasoning/progress, plans, command runs, web/tool calls, subagent activity, changed files, test results, and final responses stay inline and collapsible.
-   - Codex App Server `turn/*` and `item/*` events and Claude Code stream-json records are adapted separately into the shared timeline; neither provider is flattened into a generic artifact list.
-   - Local image artifacts render as in-app thumbnails and an enlarged preview.
-   - Every verified local artifact has a `Reveal in Finder` action. Relative paths resolve against the task’s recorded project `cwd`.
 
 File access is mediated by narrow Electron IPC. The renderer cannot read arbitrary files: preview/reveal accepts only canonical paths under a project root already discovered from a provider task or explicitly registered by the user. Preview is limited to supported image formats and 25 MB; the main process returns a decoded data URL instead of exposing `file://` access.
 
@@ -234,9 +234,11 @@ File access is mediated by narrow Electron IPC. The renderer cannot read arbitra
 
 - The composer mounts at the bottom of the inspector only while the `Chat` tab is open, for every non-archived main agent and subagent. It remains isolated from background transcript and workspace refreshes so typing stays responsive.
 - `Enter` sends; `Shift+Enter` inserts a newline. The composer accepts up to 10 explicitly selected local files, each capped at 25 MB, and shows removable attachment chips before sending. Pasting an image with `⌘V` adds it as a provider-native image attachment without interfering with ordinary text paste.
+- The composer exposes a provider-appropriate model selector. The selected model applies to the next idle turn or resumed Claude invocation; while a locally controlled run is active, the selector is locked because steering cannot change the model of an already-active turn.
 - Clipboard images are read only by Electron's main process through a no-argument IPC method, encoded as private PNGs under Electron `userData`, granted for the current attachment flow, and cleaned after seven days.
-- Codex resumes the exact provider thread. If the latest turn is active, Constellation uses `turn/steer` with its expected turn id; otherwise it starts a new turn. Images are sent as App Server `localImage` input items, while other files are supplied as canonical project paths in the text input.
-- Claude Code resumes the exact session with `claude -p --resume <session-id>`. Attachments use explicit `@path` references and `--add-dir` grants when a selected file is outside the task cwd.
+- Codex resumes the exact provider thread. If the latest turn is active, Constellation uses `turn/steer` with its expected turn id; otherwise it starts a new turn. A visible `Stop` control and `Escape` interrupt a Constellation-owned turn through `turn/interrupt`, after which the latest submitted input can be handled. Images are sent as App Server `localImage` input items, while other files are supplied as canonical project paths in the text input.
+- Claude Code resumes the exact session with `claude -p --resume <session-id>`. Attachments use explicit `@path` references and `--add-dir` grants when a selected file is outside the task cwd. A visible `Stop` control and `Escape` stop a Constellation-owned CLI session; the latest submitted input is then resumed safely through the CLI.
+- While the Chat tab is pinned to the latest message, new transcript content keeps the view at the bottom. If the user scrolls upward, Constellation preserves that reading position until the user returns to the latest-message edge or explicitly repins.
 - Sending never creates a renderer-only continuation. The transcript refreshes from the provider source of truth and continues updating from live notifications.
 - Runtime truth is process-scoped. Tasks started or continued by Constellation have exact live status and streamed tool activity. A task active in another Codex client still syncs its persisted App Server conversation, but that other process's in-memory stop/running signal and unpersisted events are labeled as externally synced rather than guessed as idle or duplicated from private storage.
 
@@ -255,9 +257,9 @@ Attention state:
 
 ### Create main agent
 
-- Available from the selected folder or global `New agent` button.
-- Fields: context folder, task title, objective, agent profile, model, reasoning effort, permission mode, optional branch/worktree.
-- Provider is explicit: `Codex` or `Claude Code`. Preview shows the resulting provider/node identity before creation.
+- Available from the selected folder or global `New agent` button. The open/selected folder is used as the context; the creation view asks only for the new agent's title.
+- Codex is the silent runtime default for this streamlined path. Creation starts the provider thread in the selected folder, then opens the inspector directly on `Chat` without sending an empty initial turn; the first user message is sent from the composer.
+- Advanced provider and execution settings remain outside this one-field creation flow.
 
 ### Rename or edit a task
 
@@ -279,11 +281,12 @@ Attention state:
 
 ### Delete/archive
 
-- Default action is Archive and calls App Server `thread/archive`; restore calls `thread/unarchive`. Threads with children explain the consequence and offer: archive tree, reparent children, or cancel. The UI must not claim that a local “delete” removed Codex history when the server only archived it.
+- Default action is Archive and calls App Server `thread/archive`; restore calls `thread/unarchive`. Archive is a reversible Constellation/provider operation and is distinct from permanent deletion. Threads with children explain the consequence and offer: archive tree, reparent children, or cancel. The UI must not claim that a local “delete” removed Codex history when the server only archived it.
 - Pinning is Constellation presentation metadata (stored locally by thread id), because the current App Server protocol exposes archive/unarchive but no portable thread-pin mutation. It must be clearly labeled as a local view preference.
 - Renaming calls `thread/setName` and changes the user-facing thread name only. It does not change the immutable thread id, `cwd`, source, parent relationship, or historical messages; if a server version does not support the method, the UI falls back to read-only title display.
-- Threads with children explain the consequence and offer: archive tree, reparent children, or cancel. Destructive actions require confirmation and provide a 6-second Undo toast where the underlying operation can be reversed.
-- Claude Code uses `Archive in Constellation` and `Remove from Constellation`; both are app-local overlays and never modify the underlying Claude JSONL transcript. Codex continues to use the supported App Server mutations.
+- Threads with children explain the consequence and offer: archive tree, reparent children, or cancel. Archive actions require confirmation and provide a 6-second Undo toast where the underlying operation can be reversed.
+- `Delete permanently` is a separate, explicit action with typed confirmation, no Undo claim, and a hard precondition that all sessions Constellation can identify as running among the selected agent and its descendants have stopped. Other clients’ in-memory runtime state is not observable. For Codex it calls the official App Server `thread/delete` mutation and recursively deletes the selected thread’s mapped descendants. For Claude Code, which has no supported delete API, it may unlink only canonical provider-discovered `.jsonl` transcript files under `~/.claude/projects` for the selected session and recursively mapped descendants. It must never touch project files, `CLAUDE.md`/memories, credentials, settings, or unrelated caches. Deleting a main agent always cascades to its subagents.
+- Claude Code uses Archive and title changes as app-local overlay state; those actions do not modify provider history. Permanent deletion is the only guarded exception to normal read-only Claude history discovery.
 
 ## 8. Alternative views
 
@@ -392,7 +395,7 @@ interface AgentRepository {
 }
 ```
 
-- `createThread` maps to App Server `thread/start` followed by the initial turn, with the selected folder’s `cwd`. `updateThread` may only expose server-supported mutations (`thread/setName` and supported settings); identifiers, source, parent, and cwd are immutable in the inspector. `archiveThread` maps to `thread/archive`; restore maps to `thread/unarchive`. “New subagent” resumes the real parent and starts a turn explicitly requesting bounded delegation; the child appears only after Codex reports a spawned descendant with a parent link—never as a renderer-only placeholder.
+- `createThread` maps to App Server `thread/start` with the selected folder's `cwd` and title, without an empty initial turn. `updateThread` may only expose server-supported mutations (`thread/setName` and supported settings); identifiers, source, parent, and cwd are immutable in the inspector. `archiveThread` maps to `thread/archive`; restore maps to `thread/unarchive`. “New subagent” resumes the real parent and starts a turn explicitly requesting bounded delegation; the child appears only after Codex reports a spawned descendant with a parent link—never as a renderer-only placeholder.
 - Keep the adapter replaceable, but keep the live adapter as the default. The browser-only Next dev preview may use the existing representative dataset behind an explicit `DEMO_DATA`/development flag and must show a `DEMO / NOT CONNECTED TO CODEX` indicator. Packaged Electron builds fail visibly into an empty disconnected state rather than loading demo data.
 - No Three.js in v1. Introduce Sigma.js/WebGL only after real profiling shows SVG/DOM is the bottleneck.
 

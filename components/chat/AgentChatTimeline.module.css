@@ -34,6 +34,8 @@
 .imagePreview img { display: block; width: 100%; max-height: 240px; object-fit: contain; }
 .image p { color: #9ba8b9; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .live { display: flex; align-items: center; gap: 6px; padding: 9px 11px; color: var(--accent); font-size: 12px; }
+.live.quiet { color: #f0b84b; }
+.live.stalled { color: #ffd27c; border: 1px solid rgba(240, 184, 75, .35); border-radius: 8px; background: rgba(91, 61, 18, .22); }
 .live > span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
 .live i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; animation: blink 1.2s ease-in-out infinite; }
 .live i:nth-last-child(2) { animation-delay: .15s; }

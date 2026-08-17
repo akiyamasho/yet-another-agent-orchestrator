@@ -152,6 +152,18 @@
     animation: spin 2.5s linear infinite;
     box-shadow: 0 0 14px rgba(103, 232, 249, 0.26);
 }
+.threadNode.quiet .statusRing,
+.threadNode.possiblyStalled .statusRing {
+    color: #f0b84b;
+    border-color: #f0b84b;
+    box-shadow: 0 0 13px rgba(240, 184, 75, 0.2);
+    animation: none;
+}
+.threadNode.possiblyStalled {
+    border-color: rgba(240, 184, 75, 0.72);
+    background: rgba(61, 44, 20, 0.88);
+}
+.threadNode.possiblyStalled .statePill { color: #ffd27c; font-weight: 750; }
 .status_waiting .statusRing {
     color: #fbbf24;
     border-color: #fbbf24;

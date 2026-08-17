@@ -14,7 +14,7 @@ type CodexStartInput = {
 
 type ClaudeStartInput = CodexStartInput & { sessionId?: string };
 type AgentAttachment = { path: string; name: string; size: number; isImage: boolean };
-type ContinueInput = { message: string; attachments: AgentAttachment[] };
+type ContinueInput = { message: string; attachments: AgentAttachment[]; model?: string };
 type UpdateState = {
   phase: "idle" | "checking" | "current" | "available" | "downloading" | "ready" | "installing" | "error";
   currentVersion: string;
@@ -56,14 +56,15 @@ declare global {
       };
       files: {
         selectAttachments: (input: { cwd: string }) => Promise<AgentAttachment[]>;
-        pasteImage: () => Promise<AgentAttachment>;
+        pasteImage: (input?: { bytes?: Uint8Array; mimeType?: string; name?: string }) => Promise<AgentAttachment>;
         preview: (filePath: string) => Promise<{ dataUrl: string; width: number; height: number; name: string }>;
         reveal: (filePath: string) => Promise<boolean>;
       };
       codex: {
         getSnapshot: () => Promise<CodexBridgeSnapshotResponse>;
         readThread: (threadId: string) => Promise<unknown>;
-        continueThread: (input: ContinueInput & { threadId: string }) => Promise<unknown>;
+        continueThread: (input: ContinueInput & { threadId: string }) => Promise<{ mode: "steer" | "turn" }>;
+        interruptThread: (threadId: string) => Promise<{ mode: "interrupt"; interrupted: boolean; threadId: string; turnId: string }>;
         startThread: (input: CodexStartInput) => Promise<unknown>;
         startSubagent: (input: Omit<CodexStartInput, "cwd"> & { parentThreadId: string }) => Promise<unknown>;
         updateThread: (input: Partial<CodexStartInput> & { threadId: string; cwd: string }) => Promise<unknown>;
@@ -76,14 +77,15 @@ declare global {
       claude: {
         getSnapshot: () => Promise<Omit<ClaudeSnapshot, "provider"> & { connected: boolean; capabilities?: Record<string, boolean> }>;
         readSession: (sessionId: string) => Promise<unknown>;
-        continueSession: (input: ContinueInput & { sessionId: string; cwd: string }) => Promise<{ started: boolean; sessionId: string | null }>;
-        startSession: (input: ClaudeStartInput) => Promise<{ started: boolean; sessionId: string | null }>;
+        continueSession: (input: ContinueInput & { sessionId: string; cwd: string }) => Promise<{ started: boolean; sessionId: string | null; mode: "interrupt-and-resume" | "turn" }>;
+        interruptSession: (sessionId: string) => Promise<{ interrupted: boolean; sessionId: string; mode: "interrupt" | "turn" }>;
+        startSession: (input: ClaudeStartInput) => Promise<{ started: boolean; sessionId: string | null; mode: "turn" }>;
         startSubagent: (input: Omit<ClaudeStartInput, "cwd"> & { cwd: string; parentSessionId: string }) => Promise<{ started: boolean; sessionId: string | null }>;
         resumeSession: (input: ClaudeStartInput & { sessionId: string }) => Promise<{ started: boolean; sessionId: string | null }>;
         updateSession: (input: { sessionId: string; title?: string }) => Promise<unknown>;
         archiveSession: (sessionId: string) => Promise<void>;
         unarchiveSession: (sessionId: string) => Promise<void>;
-        deleteSession: (sessionId: string) => Promise<void>;
+        deleteSession: (sessionId: string) => Promise<{ deleted: true; sessionId: string; deletedSessionIds: string[]; deletedPathsCount: number }>;
         onNotification: (listener: (message: Record<string, unknown>) => void) => () => void;
         onConnection: (listener: (state: { status: "connected" | "offline"; error?: string }) => void) => () => void;
       };

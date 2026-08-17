@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Bot, ChevronDown, ChevronRight, CircleAlert, FileCode2, Image as ImageIcon, LoaderCircle, Search, Sparkles, Terminal, UserRound, UsersRound } from "lucide-react";
 import type { AgentProvider } from "@/lib/types";
+import { formatLivenessNotice, type Liveness } from "@/lib/runtime/liveness";
 import styles from "./AgentChatTimeline.module.css";
 
 export type ChatTimelineItem = {
@@ -35,11 +36,13 @@ export type ChatTimeline = {
   turnCount: number;
 };
 
-const time = (value?: string) => value ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(value)) : "";
+const timeFormatter = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+const time = (value?: string) => value ? timeFormatter.format(new Date(value)) : "";
 const PAGE_SIZE = 60;
 
-export function AgentChatTimeline({ timeline, provider, loading, error, previews, onPreview, onReveal }: {
+export const AgentChatTimeline = memo(function AgentChatTimeline({ timeline, liveness, provider, loading, error, previews, onPreview, onReveal }: {
   timeline?: ChatTimeline;
+  liveness?: Liveness;
   provider: AgentProvider;
   loading?: boolean;
   error?: string;
@@ -49,6 +52,7 @@ export function AgentChatTimeline({ timeline, provider, loading, error, previews
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const toggleExpanded = useCallback((id: string, defaultOpen: boolean) => setExpanded((current) => ({ ...current, [id]: !(current[id] ?? defaultOpen) })), []);
   const items = useMemo(() => timeline?.items ?? [], [timeline]);
   const hiddenCount = Math.max(0, items.length - visibleCount);
   const visibleItems = useMemo(() => items.slice(-visibleCount), [items, visibleCount]);
@@ -66,33 +70,52 @@ export function AgentChatTimeline({ timeline, provider, loading, error, previews
       if (item.kind === "file") return <FileItem key={item.id} item={item} onReveal={onReveal}/>;
       if (item.kind === "image") return <ImageItem key={item.id} item={item} preview={item.path ? previews?.[item.path] : undefined} onPreview={onPreview} onReveal={onReveal}/>;
       const open = expanded[item.id] ?? item.kind === "plan";
-      return <article key={item.id} className={`${styles.event} ${styles[item.status]}`}>
-        <button className={styles.eventHeader} onClick={() => setExpanded((current) => ({ ...current, [item.id]: !open }))} aria-expanded={open}>
-          <EventIcon item={item}/><span><strong>{item.label || labelFor(item)}</strong>{item.title && <small>{item.title}</small>}</span>
-          {item.status === "running" && <LoaderCircle className={styles.spin} size={14}/>} {open ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
-        </button>
-        {open && (item.text || item.detail) && <pre>{item.text || item.detail}</pre>}
-        {open && item.text && item.detail && <pre className={styles.detail}>{item.detail}</pre>}
-      </article>;
+      return <EventItem key={item.id} item={item} open={open} onToggle={toggleExpanded}/>;
     })}
-    {timeline?.status === "running" && <div className={styles.live}><span/><strong>{provider === "claude" ? "Claude Code" : "Codex"} is working</strong><i/><i/><i/></div>}
+    {timeline?.status === "running" && liveness?.state !== "possibly_stalled" && liveness?.state !== "quiet" && <div className={styles.live}><span/><strong>{provider === "claude" ? "Claude Code" : "Codex"} is working</strong><i/><i/><i/></div>}
+    {timeline?.status === "running" && (liveness?.state === "possibly_stalled" || liveness?.state === "quiet") && <div className={`${styles.live} ${liveness.state === "possibly_stalled" ? styles.stalled : styles.quiet}`} role="status"><span/><strong>{formatLivenessNotice(liveness)}</strong></div>}
   </div>;
-}
+});
 
-function Message({ item, provider }: { item: ChatTimelineItem; provider: AgentProvider }) {
+const Message = memo(function Message({ item, provider }: { item: ChatTimelineItem; provider: AgentProvider }) {
   const user = item.role === "user";
   return <article className={`${styles.message} ${user ? styles.user : styles.assistant}`}>
     <header>{user ? <UserRound size={14}/> : <Bot size={14}/>}<strong>{user ? "You" : provider === "claude" ? "Claude" : "Codex"}</strong>{item.timestamp && <time>{time(item.timestamp)}</time>}</header>
     <div>{item.text}</div>
   </article>;
-}
+}, (previous, next) => previous.provider === next.provider && sameItem(previous.item, next.item));
 
-function FileItem({ item, onReveal }: { item: ChatTimelineItem; onReveal?: (path: string) => void }) {
+const FileItem = memo(function FileItem({ item, onReveal }: { item: ChatTimelineItem; onReveal?: (path: string) => void }) {
   return <article className={styles.files}><header><FileCode2 size={15}/><strong>{item.label || "File changes"}</strong></header>{(item.changes ?? []).map((change) => <div key={`${item.id}-${change.path}`}><button onClick={() => onReveal?.(change.path)} title={change.path}><span>{change.action || "changed"}</span>{change.path}</button>{change.diff && <details><summary>View diff</summary><pre>{change.diff}</pre></details>}</div>)}</article>;
-}
+}, (previous, next) => sameItem(previous.item, next.item) && previous.onReveal === next.onReveal);
 
-function ImageItem({ item, preview, onPreview, onReveal }: { item: ChatTimelineItem; preview?: string; onPreview?: (path: string) => void; onReveal?: (path: string) => void }) {
+const ImageItem = memo(function ImageItem({ item, preview, onPreview, onReveal }: { item: ChatTimelineItem; preview?: string; onPreview?: (path: string) => void; onReveal?: (path: string) => void }) {
   return <article className={styles.image}><header><ImageIcon size={15}/><strong>{item.label || "Image"}</strong></header>{preview && <button className={styles.imagePreview} onClick={() => item.path && onPreview?.(item.path)}><img src={preview} alt={item.path ? item.path.split(/[\\/]/).pop() : "Agent image"}/></button>}{item.path && <button className={styles.pathButton} onClick={() => onReveal?.(item.path!)}>{item.path}</button>}{item.text && <p>{item.text}</p>}</article>;
+}, (previous, next) => sameItem(previous.item, next.item) && previous.preview === next.preview && previous.onPreview === next.onPreview && previous.onReveal === next.onReveal);
+
+const EventItem = memo(function EventItem({ item, open, onToggle }: { item: ChatTimelineItem; open: boolean; onToggle: (id: string, defaultOpen: boolean) => void }) {
+  return <article className={`${styles.event} ${styles[item.status]}`}>
+    <button className={styles.eventHeader} onClick={() => onToggle(item.id, item.kind === "plan")} aria-expanded={open}>
+      <EventIcon item={item}/><span><strong>{item.label || labelFor(item)}</strong>{item.title && <small>{item.title}</small>}</span>
+      {item.status === "running" && <LoaderCircle className={styles.spin} size={14}/>} {open ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
+    </button>
+    {open && (item.text || item.detail) && <pre>{item.text || item.detail}</pre>}
+    {open && item.text && item.detail && <pre className={styles.detail}>{item.detail}</pre>}
+  </article>;
+}, (previous, next) => previous.open === next.open && sameItem(previous.item, next.item) && previous.onToggle === next.onToggle);
+
+function sameItem(previous: ChatTimelineItem, next: ChatTimelineItem) {
+  if (previous === next) return true;
+  if (previous.id !== next.id || previous.kind !== next.kind || previous.rawType !== next.rawType || previous.status !== next.status) return false;
+  if (previous.turnId !== next.turnId || previous.role !== next.role || previous.label !== next.label || previous.title !== next.title) return false;
+  if (previous.text !== next.text || previous.detail !== next.detail || previous.path !== next.path || previous.timestamp !== next.timestamp || previous.exitCode !== next.exitCode || previous.durationMs !== next.durationMs) return false;
+  const previousChanges = previous.changes ?? [];
+  const nextChanges = next.changes ?? [];
+  if (previousChanges.length !== nextChanges.length) return false;
+  return previousChanges.every((change, index) => {
+    const other = nextChanges[index];
+    return change.path === other.path && change.action === other.action && change.diff === other.diff;
+  });
 }
 
 function EventIcon({ item }: { item: ChatTimelineItem }) {

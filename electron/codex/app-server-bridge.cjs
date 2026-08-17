@@ -39,6 +39,7 @@ class CodexAppServerBridge extends EventEmitter {
     this._initialized = false;
     this._restartTimer = null;
     this._connectOptions = null;
+    this._activeTurns = new Map();
   }
 
   get connected() { return Boolean(this._child) && !this._closed; }
@@ -49,7 +50,7 @@ class CodexAppServerBridge extends EventEmitter {
     this._connectOptions = { clientInfo, capabilities };
     this._spawn();
     const result = await this.request('initialize', {
-      clientInfo: clientInfo || { name: 'constellation', title: 'Constellation', version: '0.4.0' },
+      clientInfo: clientInfo || { name: 'constellation', title: 'Constellation', version: '0.4.1' },
       capabilities: capabilities || { experimentalApi: true, requestAttestation: false },
     });
     this._send({ jsonrpc: '2.0', method: 'initialized', params: {} });
@@ -59,6 +60,7 @@ class CodexAppServerBridge extends EventEmitter {
   }
 
   _spawn() {
+    this._activeTurns.clear();
     this._buffer = '';
     this._child = this.spawn(this.command, this.args, {
       cwd: this.cwd,
@@ -72,6 +74,7 @@ class CodexAppServerBridge extends EventEmitter {
       const error = new CodexAppServerError(`Codex app-server exited (${signal || code})`, { code, signal });
       this._child = null;
       this._initialized = false;
+      this._activeTurns.clear();
       this._failAll(error);
       this.emit('exit', { code, signal, error });
       if (!this._closed && this.autoRestart) {
@@ -100,9 +103,24 @@ class CodexAppServerBridge extends EventEmitter {
         if (message.error) pending.reject(new CodexAppServerError(message.error.message || 'Codex request failed', { rpcError: message.error, method: pending.method }));
         else pending.resolve(message.result);
       } else if (message.method) {
+        this._trackTurnNotification(message);
         this.emit('notification', message);
         this.emit(message.method, message.params);
       }
+    }
+  }
+
+  _trackTurnNotification(message) {
+    const params = message.params || {};
+    const threadId = params.threadId || params.thread_id || params.thread?.id || params.turn?.threadId;
+    if (!threadId) return;
+    const key = String(threadId);
+    if (message.method === 'turn/started') {
+      const turnId = params.turnId || params.turn?.id || params.id;
+      if (turnId) this._activeTurns.set(key, String(turnId));
+    } else if (message.method === 'turn/completed' || message.method === 'turn/failed' || message.method === 'turn/interrupted') {
+      const turnId = params.turnId || params.turn?.id || params.id;
+      if (!turnId || this._activeTurns.get(key) === String(turnId)) this._activeTurns.delete(key);
     }
   }
 
@@ -147,21 +165,32 @@ class CodexAppServerBridge extends EventEmitter {
   readThread(threadId, options = {}) { return this.request('thread/read', { threadId, ...options }); }
   startThread(params = {}) { return this.request('thread/start', params); }
   resumeThread(threadId, params = {}) { return this.request('thread/resume', { threadId, ...params }); }
-  startTurn(threadId, input, params = {}) {
+  async startTurn(threadId, input, params = {}) {
     const items = typeof input === 'string'
       ? [{ type: 'text', text: input, text_elements: [] }]
       : Array.isArray(input) ? input : [];
-    return this.request('turn/start', {
+    const result = await this.request('turn/start', {
       threadId,
       input: items,
       ...params,
     });
+    const turnId = result?.turn?.id || result?.turnId || result?.turn_id;
+    if (turnId) this._activeTurns.set(String(threadId), String(turnId));
+    return result;
   }
   steerTurn(threadId, turnId, input) {
     const items = typeof input === 'string'
       ? [{ type: 'text', text: input, text_elements: [] }]
       : Array.isArray(input) ? input : [];
     return this.request('turn/steer', { threadId, expectedTurnId: turnId, input: items });
+  }
+  getActiveTurnId(threadId) { return this._activeTurns.get(String(threadId)) || null; }
+  async interruptTurn(threadId, turnId) {
+    if (!turnId || typeof turnId !== 'string') throw new CodexAppServerError('A concrete active Codex turn id is required to interrupt', { threadId });
+    const result = await this.request('turn/interrupt', { threadId, turnId });
+    const key = String(threadId);
+    if (this._activeTurns.get(key) === turnId) this._activeTurns.delete(key);
+    return result;
   }
   setThreadName(threadId, name) { return this.request('thread/name/set', { threadId, name }); }
   updateThreadSettings(threadId, params = {}) { return this.request('thread/settings/update', { threadId, ...params }); }
@@ -187,6 +216,7 @@ class CodexAppServerBridge extends EventEmitter {
     if (this._child) this._child.kill();
     this._child = null;
     this._initialized = false;
+    this._activeTurns.clear();
     this._failAll(new CodexAppServerError('Codex app-server bridge closed'));
   }
 

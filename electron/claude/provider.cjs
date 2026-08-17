@@ -136,7 +136,7 @@ class ClaudeCodeProvider extends EventEmitter {
     this.children = new Map();
     this.runtimeStatuses = new Map();
     this.liveRecords = new Map();
-    this.capabilities = { archive: false, delete: false, rename: false, resume: true, start: true };
+    this.capabilities = { archive: false, delete: true, rename: false, resume: true, start: true, historyDestructiveDelete: true };
   }
 
   async listProjects() {
@@ -185,6 +185,36 @@ class ClaudeCodeProvider extends EventEmitter {
     return { ...session, runtimeStatus: this.runtimeStatuses.get(sessionId) || session.runtimeStatus || session.status, records, messages: records.filter((r) => r.type === 'user' || r.type === 'assistant').map((r) => ({ id: r.uuid || null, role: r.type, text: recordText(r), timestamp: iso(r.timestamp), raw: r })), files: extractFiles(records) };
   }
 
+  isRunning(sessionId) {
+    const id = String(sessionId || '');
+    return Boolean(id && this.children.get(id) && !this.children.get(id).closed);
+  }
+
+  async interruptSession(sessionId, { timeoutMs = 1500, killTimeoutMs = 1000 } = {}) {
+    const id = String(sessionId || '');
+    const handle = this.children.get(id);
+    if (!handle || handle.closed) {
+      if (this.runtimeStatuses.get(id) === 'running') {
+        throw new ClaudeCodeError(`Claude session ${id} is active but is not owned by this Constellation process; refusing to signal an external process`, { sessionId: id, external: true });
+      }
+      return { interrupted: false, sessionId: id, mode: 'turn' };
+    }
+    handle.interrupted = true;
+    this.runtimeStatuses.set(id, 'interrupted');
+    const exitPromise = handle.exitPromise;
+    try { handle.child.kill('SIGINT'); } catch (error) { handle.emit('stderr', `Could not interrupt Claude session: ${error.message}`); }
+    let exited = await Promise.race([exitPromise, new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs))]);
+    if (!exited && !handle.closed) {
+      try { handle.child.kill('SIGTERM'); } catch {}
+      exited = await Promise.race([exitPromise, new Promise((resolve) => setTimeout(() => resolve(null), killTimeoutMs))]);
+    }
+    if (!exited && !handle.closed) {
+      try { handle.child.kill('SIGKILL'); } catch {}
+      exited = await exitPromise;
+    }
+    return { interrupted: true, sessionId: id, mode: 'interrupt' };
+  }
+
   startSession({ cwd, prompt, name, model, sessionId, resume = false, extraArgs = [] } = {}) {
     if (!cwd || !path.isAbsolute(cwd)) throw new ClaudeCodeError('A valid absolute cwd is required');
     if (!prompt || typeof prompt !== 'string') throw new ClaudeCodeError('A non-empty prompt is required');
@@ -197,7 +227,18 @@ class ClaudeCodeProvider extends EventEmitter {
     const handle = new EventEmitter();
     handle.child = child;
     handle.sessionId = sessionId || null;
+    handle.interrupted = false;
+    handle.closed = false;
+    handle.exitPromise = new Promise((resolve) => handle.once('exit', resolve));
     if (sessionId) this.runtimeStatuses.set(sessionId, 'running');
+    const setSessionId = (nextSessionId) => {
+      if (!nextSessionId || handle.sessionId === nextSessionId) return;
+      const oldKey = handle.sessionId || child.pid;
+      handle.sessionId = String(nextSessionId);
+      if (this.children.get(oldKey) === handle) this.children.delete(oldKey);
+      this.children.set(handle.sessionId, handle);
+      this.runtimeStatuses.set(handle.sessionId, 'running');
+    };
     let buffer = '';
     const emitLines = (chunk) => {
       buffer += String(chunk);
@@ -207,10 +248,10 @@ class ClaudeCodeProvider extends EventEmitter {
         if (!line.trim()) continue;
         let event;
         try { event = JSON.parse(line); } catch { event = { type: 'text', text: line }; }
-        if (event.session_id) handle.sessionId = event.session_id;
+        if (event.session_id) setSessionId(event.session_id);
         if (handle.sessionId) {
           const failed = event.type === 'result' && (/error|fail/.test(String(event.subtype || '').toLowerCase()) || event.is_error === true);
-          this.runtimeStatuses.set(handle.sessionId, event.type === 'result' ? (failed ? 'failed' : 'completed') : 'running');
+          if (!handle.interrupted) this.runtimeStatuses.set(handle.sessionId, event.type === 'result' ? (failed ? 'failed' : 'completed') : 'running');
           const records = this.liveRecords.get(handle.sessionId) || [];
           records.push(event);
           if (records.length > 300) records.splice(0, records.length - 300);
@@ -222,8 +263,17 @@ class ClaudeCodeProvider extends EventEmitter {
     };
     child.stdout.on('data', emitLines);
     child.stderr.on('data', (chunk) => handle.emit('stderr', String(chunk)));
-    child.on('error', (error) => { if (handle.sessionId) this.runtimeStatuses.set(handle.sessionId, 'failed'); handle.emit('error', error); this.emit('error', error); });
-    child.on('close', (code, signal) => { if (handle.sessionId && this.runtimeStatuses.get(handle.sessionId) === 'running') this.runtimeStatuses.set(handle.sessionId, code === 0 ? 'completed' : 'failed'); this.children.delete(handle.sessionId || child.pid); handle.emit('exit', { code, signal, sessionId: handle.sessionId }); this.emit('exit', { code, signal, sessionId: handle.sessionId }); });
+    child.on('error', (error) => { if (!handle.interrupted && handle.sessionId) this.runtimeStatuses.set(handle.sessionId, 'failed'); handle.emit('error', error); if (!handle.interrupted) this.emit('error', error); });
+    child.on('close', (code, signal) => {
+      if (handle.closed) return;
+      handle.closed = true;
+      if (handle.sessionId && !handle.interrupted && this.runtimeStatuses.get(handle.sessionId) === 'running') this.runtimeStatuses.set(handle.sessionId, code === 0 ? 'completed' : 'failed');
+      if (handle.sessionId && handle.interrupted) this.runtimeStatuses.set(handle.sessionId, 'interrupted');
+      this.children.delete(handle.sessionId || child.pid);
+      const exit = { code, signal, sessionId: handle.sessionId, interrupted: handle.interrupted };
+      handle.emit('exit', exit);
+      this.emit('exit', exit);
+    });
     this.children.set(handle.sessionId || child.pid, handle);
     return handle;
   }
@@ -231,7 +281,115 @@ class ClaudeCodeProvider extends EventEmitter {
   resumeSession(sessionId, prompt, options = {}) { return this.startSession({ ...options, sessionId, prompt, resume: true }); }
 
   async archiveSession() { throw new ClaudeCodeError('Claude Code has no supported archive API; session remains recoverable in local history', { capability: 'archive', supported: false }); }
-  async deleteSession() { throw new ClaudeCodeError('Claude Code session deletion is intentionally disabled; the provider is read-only for local history', { capability: 'delete', supported: false }); }
+
+  async deleteSession(sessionId) {
+    const id = String(sessionId || '').trim();
+    if (!id) throw new ClaudeCodeError('A Claude session id is required for deletion.', { capability: 'delete' });
+
+    // Discovery remains read-only. This explicit endpoint is the sole path that
+    // may unlink provider history, and it only operates on this inventory.
+    const sessions = await this.listSessions();
+    const byId = new Map();
+    for (const session of sessions) {
+      if (!session?.id || byId.has(String(session.id))) {
+        if (session?.id) throw new ClaudeCodeError(`Claude session inventory is ambiguous for ${session.id}; refusing deletion.`, { capability: 'delete' });
+        continue;
+      }
+      byId.set(String(session.id), session);
+    }
+    const selected = byId.get(id);
+    if (!selected) throw new ClaudeCodeError(`Claude session not found: ${id}`, { sessionId: id, capability: 'delete' });
+
+    const descendants = new Map([[id, selected]]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const session of sessions) {
+        const parent = session.parentSessionId == null ? '' : String(session.parentSessionId);
+        if (parent && descendants.has(parent) && !descendants.has(String(session.id))) {
+          descendants.set(String(session.id), session);
+          changed = true;
+        }
+      }
+    }
+    for (const descendant of descendants.values()) {
+      const descendantId = String(descendant.id);
+      if (this.isRunning(descendantId) || this.runtimeStatuses.get(descendantId) === 'running') {
+        throw new ClaudeCodeError(`Stop Claude session ${descendantId} before deleting it; running sessions are not deleted.`, { sessionId: descendantId, capability: 'delete', running: true });
+      }
+    }
+
+    let canonicalProjectsDir;
+    try { canonicalProjectsDir = await fsp.realpath(this.projectsDir); }
+    catch (error) { throw new ClaudeCodeError(`Cannot verify Claude history location: ${error.message}`, { capability: 'delete' }); }
+    const rootPrefix = `${canonicalProjectsDir}${path.sep}`;
+    const validated = [];
+    for (const session of descendants.values()) {
+      const transcriptPath = session.transcriptPath;
+      if (typeof transcriptPath !== 'string' || !path.isAbsolute(transcriptPath) || !transcriptPath.toLowerCase().endsWith('.jsonl')) {
+        throw new ClaudeCodeError(`Claude session ${session.id} has an invalid transcript path; refusing deletion.`, { sessionId: String(session.id), capability: 'delete' });
+      }
+      const absolute = path.resolve(transcriptPath);
+      let stat;
+      try {
+        stat = await fsp.lstat(absolute);
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          // macOS commonly exposes /private/var through the /var alias. For an
+          // already-missing file, resolve its existing parent before applying
+          // containment; never trust the unresolved lexical alias by itself.
+          let parentRealPath;
+          try { parentRealPath = await fsp.realpath(path.dirname(absolute)); }
+          catch (parentError) { throw new ClaudeCodeError(`Cannot verify Claude transcript for ${session.id}: ${parentError.message}`, { sessionId: String(session.id), capability: 'delete' }); }
+          if (parentRealPath !== canonicalProjectsDir && !parentRealPath.startsWith(rootPrefix)) {
+            throw new ClaudeCodeError(`Claude transcript for ${session.id} is outside the canonical projects directory; refusing deletion.`, { sessionId: String(session.id), capability: 'delete' });
+          }
+          validated.push({ id: String(session.id), path: absolute, missing: true });
+          continue;
+        }
+        throw new ClaudeCodeError(`Cannot verify Claude transcript for ${session.id}: ${error.message}`, { sessionId: String(session.id), capability: 'delete' });
+      }
+      if (stat.isSymbolicLink() || !stat.isFile()) throw new ClaudeCodeError(`Claude transcript for ${session.id} is not a regular file; refusing deletion.`, { sessionId: String(session.id), capability: 'delete' });
+      let realPath;
+      try { realPath = await fsp.realpath(absolute); }
+      catch (error) { throw new ClaudeCodeError(`Cannot verify Claude transcript for ${session.id}: ${error.message}`, { sessionId: String(session.id), capability: 'delete' }); }
+      if (!realPath.startsWith(rootPrefix) || !realPath.toLowerCase().endsWith('.jsonl')) {
+        throw new ClaudeCodeError(`Claude transcript for ${session.id} is outside the canonical projects directory; refusing deletion.`, { sessionId: String(session.id), capability: 'delete' });
+      }
+      validated.push({ id: String(session.id), path: absolute, missing: false });
+    }
+    // Delete descendants before parents so a malformed/partial sidechain tree
+    // cannot leave a parent file as an accidental source of stale context.
+    const depth = (session) => {
+      let value = 0;
+      let parent = session.parentSessionId == null ? '' : String(session.parentSessionId);
+      const seen = new Set();
+      while (parent && descendants.has(parent) && !seen.has(parent)) {
+        seen.add(parent); value += 1; parent = descendants.get(parent).parentSessionId == null ? '' : String(descendants.get(parent).parentSessionId);
+      }
+      return value;
+    };
+    validated.sort((a, b) => depth(descendants.get(b.id)) - depth(descendants.get(a.id)));
+    let deletedPathsCount = 0;
+    for (const item of validated) {
+      if (item.missing) continue;
+      try {
+        await fsp.unlink(item.path);
+        deletedPathsCount += 1;
+      } catch (error) {
+        if (error.code === 'ENOENT') continue;
+        throw new ClaudeCodeError(`Could not delete Claude transcript for ${item.id}: ${error.message}`, { sessionId: item.id, capability: 'delete' });
+      }
+    }
+    const deletedSessionIds = [...descendants.keys()];
+    deletedSessionIds.forEach((deletedId) => {
+      this.runtimeStatuses.delete(deletedId);
+      this.liveRecords.delete(deletedId);
+      const handle = this.children.get(deletedId);
+      if (handle && handle.closed) this.children.delete(deletedId);
+    });
+    return { deleted: true, sessionId: id, deletedSessionIds, deletedPathsCount };
+  }
 }
 
 module.exports = { ClaudeCodeProvider, ClaudeCodeError, readJsonLines, sessionFromRecords, extractFiles };

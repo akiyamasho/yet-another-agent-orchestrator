@@ -16,10 +16,11 @@ import {
 import { Check, CircleAlert, Pause, Radio, Sparkles } from "lucide-react";
 import { useConstellationStore } from "@/lib/store/useConstellationStore";
 import type { AgentThread, FolderContext, ThreadStatus } from "@/lib/types";
+import { classifyLiveness, type Liveness } from "@/lib/runtime/liveness";
 import styles from "./MapView.module.css";
 
 type FolderNodeData = { folder: FolderContext; count: number; live: number; recent: number; attention: number; onSelect: () => void };
-type ThreadNodeData = { thread: AgentThread; folder: FolderContext; depth: number; dimmed: boolean; onSelect: () => void };
+type ThreadNodeData = { thread: AgentThread; folder: FolderContext; depth: number; dimmed: boolean; liveness: Liveness; onSelect: () => void };
 type WorkspaceNodeData = { folderCount: number; threadCount: number };
 type MapNode = Node<FolderNodeData | ThreadNodeData | WorkspaceNodeData>;
 
@@ -79,15 +80,16 @@ function WorkspaceNode({ data }: NodeProps<MapNode>) {
 }
 
 function ThreadNode({ data }: NodeProps<MapNode>) {
-  const { thread, folder, depth, dimmed, onSelect } = data as ThreadNodeData;
+  const { thread, folder, depth, dimmed, liveness, onSelect } = data as ThreadNodeData;
   const provider = getProvider(thread);
   const isRecentExternal = Boolean(thread.recentlyActiveExternally && thread.status !== "running" && thread.status !== "needs_attention");
-  const stateLabel = thread.status === "running" ? "LIVE" : thread.status === "needs_attention" ? "Needs you" : isRecentExternal ? "Recent external" : statusLabel[thread.status];
-  return <button data-depth={Math.min(depth, 2)} className={`${styles.threadNode} ${styles[`status_${thread.status}`]} ${isRecentExternal ? styles.recentExternal : ""} ${dimmed ? styles.dimmed : ""}`} style={{ "--accent": folder.accent, "--provider-color": provider.color, "--depth": depth } as React.CSSProperties} onClick={onSelect} aria-label={`${thread.key}: ${thread.title}, ${provider.label}, ${stateLabel}`}>
+  const stateLabel = thread.status === "running" ? (liveness.state === "active" ? "LIVE" : liveness.label || "Running") : thread.status === "needs_attention" ? "Needs you" : isRecentExternal ? "Recent external" : statusLabel[thread.status];
+  const stalled = liveness.state === "possibly_stalled";
+  return <button data-depth={Math.min(depth, 2)} className={`${styles.threadNode} ${styles[`status_${thread.status}`]} ${stalled ? styles.possiblyStalled : liveness.state === "quiet" ? styles.quiet : ""} ${isRecentExternal ? styles.recentExternal : ""} ${dimmed ? styles.dimmed : ""}`} style={{ "--accent": folder.accent, "--provider-color": provider.color, "--depth": depth } as React.CSSProperties} onClick={onSelect} aria-label={`${thread.key}: ${thread.title}, ${provider.label}, ${stateLabel}`}>
     <ConstellationHandles/>
     <span className={styles.statusRing}><StatusGlyph status={thread.status} /></span>
     <span className={styles.providerBadge} style={{ color: provider.color, borderColor: provider.color }} title={provider.label}>{provider.short}</span>
-    <span className={styles.threadCopy}><strong>{thread.title}</strong><small>{thread.key} · {provider.label} · {statusLabel[thread.status]}</small><span className={styles.statePill}>{thread.status === "running" && <span className={styles.liveBeacon} aria-hidden="true" />}{stateLabel}</span></span>
+    <span className={styles.threadCopy}><strong>{thread.title}</strong><small>{thread.key} · {provider.label} · {statusLabel[thread.status]}</small><span className={styles.statePill}>{thread.status === "running" && liveness.state === "active" && <span className={styles.liveBeacon} aria-hidden="true" />}{stateLabel}</span></span>
     {thread.attention && <span className={styles.attentionBadge} aria-label="Attention required">!</span>}
   </button>;
 }
@@ -100,6 +102,7 @@ function MapCanvas() {
   const threadRecord = useConstellationStore((state) => state.threads);
   const selectedFolderId = useConstellationStore((state) => state.selectedFolderId);
   const selectedThreadId = useConstellationStore((state) => state.selectedThreadId);
+  const eventRecord = useConstellationStore((state) => state.events);
   const selectFolder = useConstellationStore((state) => state.selectFolder);
   const selectThread = useConstellationStore((state) => state.selectThread);
   const reducedMotion = useRef(false);
@@ -109,6 +112,16 @@ function MapCanvas() {
     () => Object.values(threadRecord).filter((thread) => !thread.archived),
     [threadRecord],
   );
+  const eventsByThread = useMemo(() => {
+    const index: Record<string, typeof eventRecord[string][]> = {};
+    Object.values(eventRecord).forEach((event) => (index[event.threadId] ??= []).push(event));
+    return index;
+  }, [eventRecord]);
+  const livenessByThread = useMemo(() => {
+    const result: Record<string, ReturnType<typeof classifyLiveness>> = {};
+    threads.forEach((thread) => { result[thread.id] = classifyLiveness({ status: thread.status, thread, events: eventsByThread[thread.id] }); });
+    return result;
+  }, [eventsByThread, threads]);
 
   useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -144,23 +157,35 @@ function MapCanvas() {
       const fx = selectedFolderId ? -90 : Math.cos(angle) * orbitRadius - 90;
       const fy = selectedFolderId ? -76 : Math.sin(angle) * orbitRadius - 76;
       const folderThreads = visibleThreads.filter((thread) => thread.folderId === folder.id);
-      const roots = folderThreads.filter((thread) => !thread.parentId);
+      const byId = new Map(folderThreads.map((thread) => [thread.id, thread]));
+      // Treat a thread whose parent is outside the visible project set as a
+      // root as well. This keeps the overview complete when history contains
+      // a stale/missing parent reference.
+      const roots = folderThreads.filter((thread) => !thread.parentId || !byId.has(thread.parentId));
       const live = folderThreads.filter((thread) => thread.status === "running").length;
       const recent = folderThreads.filter((thread) => thread.recentlyActiveExternally && thread.status !== "running" && thread.status !== "needs_attention").length;
       const attention = folderThreads.filter((thread) => thread.status === "needs_attention").length;
       result.push({ id: `folder:${folder.id}`, type: "folder", position: { x: fx, y: fy }, data: { folder, count: folderThreads.length, live, recent, attention, onSelect: () => { selectFolder(folder.id); selectThread(undefined); } } });
-      if (!selectedFolderId) return;
-      const byId = new Map(folderThreads.map((thread) => [thread.id, thread]));
       let selectedRootId = selectedThreadId;
       while (selectedRootId && byId.get(selectedRootId)?.parentId) selectedRootId = byId.get(selectedRootId)?.parentId;
-      const rootRadius = Math.max(440, Math.min(980, roots.length * 43));
+      // In the workspace overview each project gets a compact local orbit
+      // around its folder node. Keep the overview intentionally shallow: it
+      // shows the main/root agents only, and expands one tree after a main
+      // agent (or one of its descendants) is selected.
+      const rootRadius = selectedFolderId
+        ? Math.max(440, Math.min(980, roots.length * 43))
+        : Math.max(220, Math.min(360, 190 + roots.length * 18));
       const addThread = (thread: AgentThread, threadAngle: number, radius: number, depth: number, includeChildren: boolean) => {
-        const x = Math.cos(threadAngle) * radius - 110;
-        const y = Math.sin(threadAngle) * radius - 34;
-        result.push({ id: thread.id, type: "thread", position: { x, y }, data: { thread, folder, depth, dimmed: Boolean(selectedThreadId && !relatedThreadIds.has(thread.id)), onSelect: () => selectThread(thread.id) } });
+        const folderCenterX = fx + 90;
+        const folderCenterY = fy + 61;
+        const centerX = selectedFolderId ? 0 : folderCenterX;
+        const centerY = selectedFolderId ? -15 : folderCenterY;
+        const x = centerX + Math.cos(threadAngle) * radius - 94;
+        const y = centerY + Math.sin(threadAngle) * radius - 28;
+        result.push({ id: thread.id, type: "thread", position: { x, y }, data: { thread, folder, depth, liveness: livenessByThread[thread.id] ?? { state: "unknown", label: "" }, dimmed: Boolean(selectedThreadId && !relatedThreadIds.has(thread.id)), onSelect: () => selectThread(thread.id) } });
         if (!includeChildren) return;
         const children = folderThreads.filter((child) => child.parentId === thread.id);
-        const step = Math.min(0.34, Math.max(0.16, 0.72 / Math.max(children.length, 1)));
+        const step = Math.min(0.34, Math.max(0.13, 0.72 / Math.max(children.length, 1)));
         children.forEach((child, childIndex) => addThread(child, threadAngle + (childIndex - (children.length - 1) / 2) * step, radius + 220, depth + 1, true));
       };
       roots.forEach((thread, rootIndex) => {
@@ -170,7 +195,7 @@ function MapCanvas() {
       });
     });
     return result;
-  }, [folders, threads.length, visibleThreads, selectedFolderId, selectedThreadId, visibleFolderIds, selectFolder, selectThread, relatedThreadIds]);
+  }, [folders, livenessByThread, threads.length, visibleThreads, selectedFolderId, selectedThreadId, visibleFolderIds, selectFolder, selectThread, relatedThreadIds]);
 
   const edges = useMemo<Edge[]>(() => {
     const result: Edge[] = [];
@@ -197,12 +222,12 @@ function MapCanvas() {
       if (!nodes.some((node) => node.id === source) || !nodes.some((node) => node.id === thread.id)) return;
       const providerColor = getProvider(thread).color;
       const related = !selectedThreadId || relatedThreadIds.has(thread.id) || Boolean(thread.parentId && relatedThreadIds.has(thread.parentId));
-      const isLive = thread.status === "running";
+      const isLive = thread.status === "running" && livenessByThread[thread.id]?.state === "active";
       const isRecent = Boolean(thread.recentlyActiveExternally && !isLive && thread.status !== "needs_attention");
       result.push({ id: `edge:${source}:${thread.id}`, source, target: thread.id, ...radialHandles(source, thread.id), type: "straight", animated: isLive, className: isLive ? styles.liveEdge : isRecent ? styles.recentEdge : undefined, style: { stroke: thread.parentId ? providerColor : (folders.find((folder) => folder.id === thread.folderId)?.accent || providerColor), strokeWidth: isLive ? 2.4 : thread.parentId ? 1.2 : 1.45, strokeDasharray: isRecent ? "1 7" : thread.parentId ? "3 7" : undefined, opacity: related ? (isLive ? 0.94 : isRecent ? 0.7 : 0.64) : 0.1 } });
     });
     return result;
-  }, [visibleThreads, nodes, folders, selectedThreadId, selectedFolderId, relatedThreadIds]);
+  }, [livenessByThread, visibleThreads, nodes, folders, selectedThreadId, selectedFolderId, relatedThreadIds]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => flow.fitView({ padding: 0.26, duration: reducedMotion.current ? 0 : 560, nodes: nodes.map((node) => ({ id: node.id })) }), 40);

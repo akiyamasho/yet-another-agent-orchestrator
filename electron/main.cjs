@@ -4,7 +4,7 @@ const path = require("node:path");
 const { CodexAppServerBridge } = require("./codex/app-server-bridge.cjs");
 const { ClaudeCodeProvider } = require("./claude/provider.cjs");
 const { normalizeCodexTimeline, normalizeClaudeTimeline } = require("./chat/timeline.cjs");
-const { cleanupClipboardImages, saveClipboardImage } = require("./attachments/clipboard-image.cjs");
+const { cleanupClipboardImages, saveClipboardImage, saveClipboardImageBytes } = require("./attachments/clipboard-image.cjs");
 const { GitHubReleaseUpdater } = require("./updater/github-release-updater.cjs");
 
 const isMac = process.platform === "darwin";
@@ -93,6 +93,22 @@ function updateClaudeSessionState(sessionId, patch) {
   fs.mkdirSync(path.dirname(claudeSessionStateFile()), { recursive: true });
   fs.writeFileSync(claudeSessionStateFile(), `${JSON.stringify(state, null, 2)}\n`, "utf8");
   return state[sessionId];
+}
+
+function clearClaudeSessionState(sessionIds) {
+  const state = readClaudeSessionState();
+  let changed = false;
+  for (const sessionId of sessionIds) {
+    if (Object.prototype.hasOwnProperty.call(state, sessionId)) {
+      delete state[sessionId];
+      changed = true;
+    }
+  }
+  if (changed) {
+    fs.mkdirSync(path.dirname(claudeSessionStateFile()), { recursive: true });
+    fs.writeFileSync(claudeSessionStateFile(), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  }
+  return changed;
 }
 
 function rememberProjectRoot(projectPath) {
@@ -268,7 +284,7 @@ function createClaudeProvider() {
     }
     sendToRenderer("claude:notification", event);
   });
-  provider.on("exit", (event) => sendToRenderer("claude:connection", { status: event.code === 0 ? "connected" : "offline", error: event.code === 0 ? undefined : `Claude exited with code ${event.code}.` }));
+  provider.on("exit", (event) => sendToRenderer("claude:connection", { status: event.interrupted || event.code === 0 ? "connected" : "offline", error: event.interrupted || event.code === 0 ? undefined : `Claude exited with code ${event.code}.` }));
   provider.on("error", (error) => sendToRenderer("claude:connection", { status: "offline", error: error.message }));
   return provider;
 }
@@ -317,7 +333,7 @@ async function claudeSnapshot() {
   sessions.forEach((session) => rememberProjectRoot(session.cwd));
   const projects = [...new Set([...readProjects(), ...sessions.map((session) => session.cwd).filter(Boolean)])];
   projects.forEach(rememberProjectRoot);
-  return { connected: fs.existsSync(findClaudeBinary()), sessions, events: recentClaudeEvents, projects, capabilities: { ...provider.capabilities, rename: true, archive: true, delete: true, historyDestructiveDelete: false } };
+  return { connected: fs.existsSync(findClaudeBinary()), sessions, events: recentClaudeEvents, projects, capabilities: { ...provider.capabilities, rename: true, archive: true, delete: true, historyDestructiveDelete: true } };
 }
 
 function claudeArgs(input = {}) {
@@ -329,16 +345,22 @@ function claudeArgs(input = {}) {
   return extraArgs;
 }
 
-function startClaude(input, resume = false) {
+async function startClaude(input, resume = false) {
   const model = input.model && input.model !== "default" && input.model !== "Claude Code" ? input.model : undefined;
+  const provider = ensureClaude();
+  let interrupted = false;
+  if (resume && input.sessionId && (provider.isRunning(input.sessionId) || provider.runtimeStatuses.get(String(input.sessionId)) === "running")) {
+    await provider.interruptSession(String(input.sessionId));
+    interrupted = true;
+  }
   const attachments = validatedAttachments(input.attachments);
   const extraArgs = claudeArgs(input);
   const additionalDirs = [...new Set(attachments.map((item) => path.dirname(item.path)).filter((directory) => directory !== input.cwd))];
   additionalDirs.forEach((directory) => extraArgs.push("--add-dir", directory));
   const prompt = promptWithFiles(input.objective, attachments, "claude");
   const options = { cwd: input.cwd, prompt, name: input.title?.trim(), model, extraArgs };
-  const handle = resume ? ensureClaude().resumeSession(input.sessionId, prompt, options) : ensureClaude().startSession(options);
-  return { started: true, sessionId: handle.sessionId || input.sessionId || null };
+  const handle = resume ? provider.resumeSession(input.sessionId, prompt, options) : provider.startSession(options);
+  return { started: true, sessionId: handle.sessionId || input.sessionId || null, mode: interrupted ? "interrupt-and-resume" : "turn" };
 }
 
 async function continueCodex(input) {
@@ -348,9 +370,41 @@ async function continueCodex(input) {
   const bridge = await ensureCodex();
   const resumed = await bridge.resumeThread(String(input.threadId));
   const items = codexTurnInput(message, attachments);
-  const runningTurnId = activeTurnId(resumed) || activeTurnId(await bridge.readThread(String(input.threadId), { includeTurns: true }));
+  const runningTurnId = bridge.getActiveTurnId(String(input.threadId)) || activeTurnId(resumed) || activeTurnId(await bridge.readThread(String(input.threadId), { includeTurns: true }));
   if (runningTurnId) return { mode: "steer", ...(await bridge.steerTurn(String(input.threadId), runningTurnId, items)) };
-  return { mode: "turn", ...(await bridge.startTurn(String(input.threadId), items)) };
+  const model = optionalModel(input.model);
+  if (model) await bridge.updateThreadSettings(String(input.threadId), { model });
+  return { mode: "turn", ...(await bridge.startTurn(String(input.threadId), items, model ? { model } : {})) };
+}
+
+async function interruptCodex(threadId) {
+  const id = String(threadId || "").trim();
+  if (!id) throw new Error("A Codex thread id is required to interrupt.");
+  const bridge = await ensureCodex();
+  const running = bridge.getActiveTurnId(id);
+  if (!running) throw new Error("No active turn is owned by Constellation for this Codex thread; refusing to signal an external Codex process.");
+  const result = await bridge.interruptTurn(id, String(running));
+  codexRuntimeStatuses.set(id, { type: "idle", activeFlags: [] });
+  return { mode: "interrupt", interrupted: true, threadId: id, turnId: String(running), ...result };
+}
+
+async function deleteCodex(threadId) {
+  const id = String(threadId || "").trim();
+  if (!id) throw new Error("A Codex thread id is required to delete.");
+  const bridge = await ensureCodex();
+  if (bridge.getActiveTurnId(id)) throw new Error("Stop the active Codex turn before deleting this thread.");
+  let descendants;
+  try {
+    descendants = await bridge.listThreads({ ancestorThreadId: id, all: true });
+  } catch (error) {
+    throw new Error(`Unable to verify descendant Codex turns before deleting this thread; deletion was blocked: ${error.message}`);
+  }
+  const activeDescendant = descendants.find((thread) => {
+    const descendantId = thread?.id || thread?.threadId;
+    return descendantId && bridge.getActiveTurnId(String(descendantId));
+  });
+  if (activeDescendant) throw new Error("Stop the active Codex descendant turn before deleting this thread.");
+  return bridge.deleteThread(id);
 }
 
 function sandboxPolicy(permission, cwd) {
@@ -402,7 +456,15 @@ function registerIpc() {
     if (result.canceled) return [];
     return result.filePaths.slice(0, MAX_ATTACHMENTS).map(grantAttachment);
   });
-  ipcMain.handle("files:paste-image", () => grantAttachment(saveClipboardImage({ image: clipboard.readImage(), userData: app.getPath("userData"), maxBytes: MAX_ATTACHMENT_BYTES })));
+  ipcMain.handle("files:paste-image", async (_event, input) => {
+    if (input && input.bytes) {
+      const bytes = input.bytes instanceof Uint8Array ? input.bytes : new Uint8Array(input.bytes);
+      const filePath = await saveClipboardImageBytes({ bytes, mimeType: input.mimeType, name: input.name, userData: app.getPath("userData"), maxBytes: MAX_ATTACHMENT_BYTES });
+      return grantAttachment(filePath);
+    }
+    // Compatibility fallback for older renderer/preload bundles.
+    return grantAttachment(saveClipboardImage({ image: clipboard.readImage(), userData: app.getPath("userData"), maxBytes: MAX_ATTACHMENT_BYTES }));
+  });
   ipcMain.handle("codex:snapshot", () => snapshot());
   ipcMain.handle("codex:read-thread", async (_event, threadId) => {
     const raw = await (await ensureCodex()).readThread(String(threadId), { includeTurns: true });
@@ -420,6 +482,7 @@ function registerIpc() {
     return timeline;
   });
   ipcMain.handle("codex:continue-thread", (_event, input) => continueCodex(input));
+  ipcMain.handle("codex:interrupt-thread", (_event, threadId) => interruptCodex(threadId));
   ipcMain.handle("codex:start-thread", async (_event, input) => {
     const bridge = await ensureCodex();
     const response = await bridge.startThread({
@@ -430,7 +493,7 @@ function registerIpc() {
     });
     const threadId = response.thread.id;
     if (input.title?.trim()) await bridge.setThreadName(threadId, input.title.trim());
-    await bridge.startTurn(threadId, input.objective.trim(), {
+    if (input.objective?.trim()) await bridge.startTurn(threadId, input.objective.trim(), {
       ...(optionalModel(input.model) ? { model: input.model } : {}),
       ...(input.reasoningEffort && input.reasoningEffort !== "default" ? { effort: input.reasoningEffort } : {}),
     });
@@ -458,17 +521,22 @@ function registerIpc() {
   });
   ipcMain.handle("codex:archive-thread", async (_event, threadId) => (await ensureCodex()).archiveThread(String(threadId)));
   ipcMain.handle("codex:unarchive-thread", async (_event, threadId) => (await ensureCodex()).unarchiveThread(String(threadId)));
-  ipcMain.handle("codex:delete-thread", async (_event, threadId) => (await ensureCodex()).deleteThread(String(threadId)));
+  ipcMain.handle("codex:delete-thread", (_event, threadId) => deleteCodex(threadId));
   ipcMain.handle("claude:snapshot", () => claudeSnapshot());
   ipcMain.handle("claude:read-session", async (_event, sessionId) => normalizeClaudeTimeline(await ensureClaude().readSession(String(sessionId))));
   ipcMain.handle("claude:continue-session", (_event, input) => startClaude({ ...input, objective: input.message }, true));
+  ipcMain.handle("claude:interrupt-session", (_event, sessionId) => ensureClaude().interruptSession(String(sessionId)));
   ipcMain.handle("claude:start-session", (_event, input) => startClaude(input, false));
   ipcMain.handle("claude:start-subagent", (_event, input) => startClaude({ ...input, sessionId: input.parentSessionId, objective: `Delegate this bounded task to a Claude Code subagent and track it to completion:\n\n${input.title?.trim() ? `${input.title.trim()}: ` : ""}${input.objective.trim()}` }, true));
   ipcMain.handle("claude:resume-session", (_event, input) => startClaude(input, true));
   ipcMain.handle("claude:update-session", (_event, input) => updateClaudeSessionState(String(input.sessionId), { title: String(input.title || "").trim() || undefined }));
   ipcMain.handle("claude:archive-session", (_event, sessionId) => updateClaudeSessionState(String(sessionId), { archived: true }));
   ipcMain.handle("claude:unarchive-session", (_event, sessionId) => updateClaudeSessionState(String(sessionId), { archived: false }));
-  ipcMain.handle("claude:delete-session", (_event, sessionId) => updateClaudeSessionState(String(sessionId), { hidden: true }));
+  ipcMain.handle("claude:delete-session", async (_event, sessionId) => {
+    const result = await ensureClaude().deleteSession(String(sessionId));
+    clearClaudeSessionState(result.deletedSessionIds);
+    return result;
+  });
   ipcMain.handle("files:preview", (_event, filePath) => {
     const resolved = allowedLocalPath(filePath);
     if (!resolved) throw new Error("That file is outside the selected agent projects.");

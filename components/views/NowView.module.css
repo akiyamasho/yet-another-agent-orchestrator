@@ -188,6 +188,9 @@
 .status_running {
     color: var(--projector);
 }
+.quiet,
+.possiblyStalled { color: #f0b84b; }
+.possiblyStalled { font-weight: 750; }
 
 .externalBadge {
     border: 1px solid var(--line-strong);

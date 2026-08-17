@@ -47,6 +47,11 @@
     margin: 0 0 19px;
     font-size: 21px;
 }
+.agentHint {
+    margin: -6px 0 18px;
+    color: #aebbd0;
+    font-size: 13px;
+}
 .fields {
     display: grid;
     gap: 15px;
@@ -196,6 +201,29 @@
 .submitDanger { color: var(--canvas) !important; border-color: #ca6d64 !important; background: #ca6d64 !important; }
 .warning { border-radius: 0; }
 .check input { accent-color: var(--gold); }
+.confirmation {
+    display: grid;
+    gap: 8px;
+    margin-top: 16px;
+    color: var(--muted);
+    font: 9px var(--font-mono);
+    letter-spacing: .07em;
+    text-transform: uppercase;
+}
+.confirmation strong { color: var(--text); }
+.confirmation input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 10px;
+    color: var(--text);
+    background: rgba(7, 10, 17, .62);
+    font: 13px var(--font-mono);
+    letter-spacing: .12em;
+    text-transform: none;
+}
+.confirmation input:focus { outline: none; border-color: #ca6d64; box-shadow: 0 0 0 2px rgba(202, 109, 100, .22); }
 .providerRow,
 .providerBanner { display: flex; align-items: center; gap: 10px; margin: 0 0 15px; }
 .providerLabel { color: var(--muted); font: 9px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }

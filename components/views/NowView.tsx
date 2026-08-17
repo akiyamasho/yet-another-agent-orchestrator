@@ -18,6 +18,7 @@ import type {
     AgentThread,
     ThreadStatus
 } from "@/lib/types";
+import { classifyLiveness, type Liveness } from "@/lib/runtime/liveness";
 import styles from "./NowView.module.css";
 
 export interface NowViewProps {
@@ -93,7 +94,7 @@ function StatusGlyph({ status }: { status: ThreadStatus }) {
     return <Clock3 aria-hidden="true" />;
 }
 
-type Activity = { thread: AgentThread; last: { value?: string; time: number } };
+type Activity = { thread: AgentThread; last: { value?: string; time: number }; liveness: Liveness };
 type ProjectGroup = {
     folderId: string;
     activities: Activity[];
@@ -115,7 +116,9 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
             string,
             { timestamp: string; time: number }
         > = {};
+        const eventsByThread: Record<string, AgentEvent[]> = {};
         Object.values(events).forEach((event) => {
+            (eventsByThread[event.threadId] ??= []).push(event);
             const time = Date.parse(event.timestamp);
             if (
                 Number.isFinite(time) &&
@@ -132,6 +135,7 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
             .filter((thread) => {
                 if (
                     thread.archived ||
+                    thread.parentId ||
                     (selectedFolderId && thread.folderId !== selectedFolderId)
                 )
                     return false;
@@ -146,7 +150,8 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
             })
             .map((thread) => ({
                 thread,
-                last: timestampFor(thread, latestEvents[thread.id]?.timestamp)
+                last: timestampFor(thread, latestEvents[thread.id]?.timestamp),
+                liveness: classifyLiveness({ status: thread.status, thread, events: eventsByThread[thread.id] })
             }))
             .sort((a, b) => b.last.time - a.last.time);
     }, [events, folders, query, selectedFolderId, threads]);
@@ -157,6 +162,7 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
     const recent = activity
         .filter(({ thread }) => thread.status !== "running")
         .slice(0, 16);
+    const possiblyStalled = running.filter(({ liveness }) => liveness.state === "possibly_stalled").length;
 
     const grouped = (items: Activity[]) => {
         const byFolder = new Map<string, Activity[]>();
@@ -228,7 +234,7 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
                                 </span>
                             </h5>
                             <div className={styles.cards}>
-                                {providerItems.map(({ thread, last }) => {
+                                {providerItems.map(({ thread, last, liveness }) => {
                                     const parent = thread.parentId
                                         ? threads[thread.parentId]
                                         : undefined;
@@ -248,19 +254,17 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
                                                 onClick={() =>
                                                     openThread(thread.id)
                                                 }
-                                                aria-label={`Open ${thread.title}, ${meta.label}, ${statusLabels[thread.status]}`}
+                                                aria-label={`Open ${thread.title}, ${meta.label}, ${liveness.state === "active" ? "Running" : liveness.label || statusLabels[thread.status]}`}
                                             >
                                                 <span
-                                                    className={`${styles.status} ${styles[`status_${thread.status}`]}`}
+                                                    className={`${styles.status} ${styles[`status_${thread.status}`]} ${liveness.state === "possibly_stalled" ? styles.possiblyStalled : liveness.state === "quiet" ? styles.quiet : ""}`}
                                                 >
                                                     <StatusGlyph
                                                         status={thread.status}
                                                     />
                                                     <span>
                                                         {
-                                                            statusLabels[
-                                                                thread.status
-                                                            ]
+                                                            thread.status === "running" ? (liveness.state === "active" ? "Running" : liveness.label) : statusLabels[thread.status]
                                                         }
                                                     </span>
                                                     {Boolean(
@@ -359,7 +363,7 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
                 </div>
                 <div className={styles.totals}>
                     <strong>{running.length}</strong>
-                    <span>running now</span>
+                    <span>running now{possiblyStalled ? ` · ${possiblyStalled} possibly stalled` : ""}</span>
                 </div>
             </header>
             <section
@@ -373,9 +377,9 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
                                 className={styles.liveDot}
                                 aria-hidden="true"
                             />
-                            Running now
+                            Running now{possiblyStalled ? ` · ${possiblyStalled} possibly stalled` : ""}
                         </h3>
-                        <p>Live work across every connected provider.</p>
+                        <p>Live work across every connected provider. Quiet workers stay here so you can decide whether to inspect them.</p>
                     </div>
                     <span>{running.length}</span>
                 </div>

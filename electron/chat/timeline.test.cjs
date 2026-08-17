@@ -29,6 +29,22 @@ test('Codex recently changing in another client is labeled as inferred running',
   assert.equal(result.inferredRuntime, true);
 });
 
+test('Codex reasoning normalizes structured summary payloads', () => {
+  const result = normalizeCodexTimeline({ thread: { id: 'codex-reasoning', turns: [{ id: 'turn-1', items: [
+    { id: 'r1', type: 'reasoning', summary: [{ type: 'summary_text', text: 'First check the route.' }, { text: 'Then verify the bridge.' }] },
+  ] }] } });
+  assert.equal(result.items[0].kind, 'reasoning');
+  assert.equal(result.items[0].text, 'First check the route.\nThen verify the bridge.');
+});
+
+test('Codex reasoning uses a readable placeholder when no summary is available', () => {
+  const result = normalizeCodexTimeline({ thread: { id: 'codex-hidden-reasoning', turns: [{ id: 'turn-1', items: [
+    { id: 'r1', type: 'reasoning', encryptedContent: 'opaque-payload' },
+  ] }] } });
+  assert.match(result.items[0].text, /No readable reasoning summary/);
+  assert.doesNotMatch(result.items[0].text, /opaque-payload/);
+});
+
 test('Claude timeline links tool use and result and preserves file changes', () => {
   const result = normalizeClaudeTimeline({ id: 'claude-demo', runtimeStatus: 'running', records: [
     { type: 'user', uuid: 'u1', timestamp: '2026-01-01T00:00:00Z', message: { content: 'Update the file' } },

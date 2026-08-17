@@ -344,5 +344,9 @@
 }
 .primary:hover,
 .primary:focus-visible { background: color-mix(in srgb, var(--gold) 86%, white); }
+.primary:disabled,
+.primary:disabled:hover,
+.primary:disabled:focus-visible,
+.primary:disabled:active { opacity: .48; cursor: not-allowed; background: var(--material-2, transparent); border-color: var(--line); color: var(--muted, #8994b1); transform: none; }
 .filterActive:hover,
 .filterActive:focus-visible { background: color-mix(in srgb, var(--projector) 86%, white); }

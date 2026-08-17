@@ -6,6 +6,12 @@ No local web server is needed after installation.
 
 ![Synthetic demo of the Now workspace with running and recently active agents](docs/screenshots/constellation-demo-now.png)
 
+## Constellation v0.4.0 guided tour
+
+[![Watch the Constellation v0.4.0 guided tour](docs/screenshots/constellation-demo-now.png)](docs/media/constellation-v0.4.0-tour.mp4)
+
+[Watch the Constellation v0.4.0 guided tour](docs/media/constellation-v0.4.0-tour.mp4) — a silent, text-led walkthrough using synthetic demo data only.
+
 <details>
 <summary>More screenshots — synthetic demo data only</summary>
 
@@ -25,14 +31,17 @@ No local web server is needed after installation.
 
 ## What works
 
-- Spatial folder → main task → nested subagent map with smooth focus and progressive disclosure.
+- Spatial folder → main task → nested subagent map with smooth focus and progressive disclosure: the overview keeps only roots visible, and a selected main agent reveals its subagents.
 - Dense list, cross-project activity feed, `⌘⇧O` quick jump to any project/task, and `⌘K` command search.
 - Provider identity everywhere: Codex is projector blue; Claude Code is warm coral.
 - Real Codex task discovery, transcript reads, live notifications, start, task-name updates, settings, archive, restore, and delete through `codex app-server`.
 - Real Claude Code project/session discovery, transcript reads, start, resume, and bounded subagent delegation through the local `claude` CLI.
-- Continue any selected main task or subagent in the **Chat** tab, with chronological provider-native transcript refresh, `Enter` to send, local file attachments, and direct `⌘V` clipboard-image attachments.
+- Continue any selected main task or subagent in the **Chat** tab, with chronological provider-native transcript refresh, auto-pinned latest-message scrolling, `Enter` to send, local file attachments, and direct `⌘V` clipboard-image attachments.
+- Steer an active Codex turn or stop-and-resume the latest Claude Code input; a visible stop button and `Escape` handle cancellation. Archive remains reversible presentation state, while typed-confirmation **Delete permanently** uses Codex `thread/delete` or guarded Claude transcript unlinking and always cascades from a main agent to its subagents.
 - Inline Codex and Claude Code messages, reasoning/progress, plans, commands, tools, subagents, changed files, results, and image artifacts without flattening the conversation into a generic output list.
 - Responsive Chat history with bounded initial rendering, on-demand older items, non-overlapping provider refreshes, aggressive wrapping for long commands, paths, URLs, and errors, and an isolated composer that mounts only while Chat is open.
+- New Agent is a focused one-field flow: it uses the folder currently open in the main UI, defaults silently to Codex, creates the titled thread without an empty turn, and opens directly in Chat.
+- Chat includes provider-appropriate model choices; a selection applies to the next idle or resumed turn and locks during a locally controlled run because steering cannot change an active turn's model.
 - Secure in-app image thumbnails/enlarged previews and **Reveal in Finder** links.
 - Comfortable wide-screen typography plus 100%, 110%, and 120% interface scaling in Settings.
 - User-triggered GitHub Releases updates with exact-asset SHA-256 verification and staged rollback-safe replacement.
@@ -40,11 +49,11 @@ No local web server is needed after installation.
 
 ## Data-source honesty
 
-Codex uses the supported App Server protocol and never parses private Codex storage. Claude Code currently has no equivalent history server, so Constellation reads the user-owned local Claude JSONL history **read-only** and uses the official CLI for real new/resumed sessions.
+Codex uses the supported App Server protocol and never parses private Codex storage. Claude Code currently has no equivalent history server, so Constellation reads the user-owned local Claude JSONL history **read-only during normal operation** and uses the official CLI for real new/resumed sessions. The explicit, typed-confirmation `Delete permanently` flow is guarded until all sessions Constellation can identify as running among the selected session and recursively mapped descendants have stopped; other clients’ in-memory runtime state is not observable. It may unlink only canonical discovered transcript files under `~/.claude/projects`, never project files, `CLAUDE.md`/memories, credentials, settings, or unrelated caches. Permanent deletion has no Undo claim.
 
 Codex App Server live state is scoped to the client process that owns a task. Constellation shows exact running/tool-stream state for tasks it starts or continues. For a task running in another Codex window, it syncs the persisted conversation through App Server and labels the runtime as external instead of claiming a false idle state; it never scrapes Codex's private logs to imitate the other client's event stream.
 
-Claude Code also has no supported single-session destructive-delete API. Its title, archive, and “Remove from Constellation” actions are explicit app-local overlays; the underlying Claude transcript remains untouched and resumable. Browser development mode uses clearly marked synthetic fixtures. Packaged Electron mode never silently swaps real provider data for dummy data.
+Claude Code also has no supported single-session destructive-delete API. Its title and archive actions are explicit app-local overlays; the underlying Claude transcript remains untouched and resumable unless the user invokes the separate guarded permanent-delete flow. Browser development mode uses clearly marked synthetic fixtures. Packaged Electron mode never silently swaps real provider data for dummy data.
 
 ## Now workspace
 
