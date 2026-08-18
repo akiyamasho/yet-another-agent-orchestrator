@@ -85,7 +85,7 @@ declare global {
         updateSession: (input: { sessionId: string; title?: string }) => Promise<unknown>;
         archiveSession: (sessionId: string) => Promise<void>;
         unarchiveSession: (sessionId: string) => Promise<void>;
-        deleteSession: (sessionId: string) => Promise<{ deleted: true; sessionId: string; deletedSessionIds: string[]; deletedPathsCount: number }>;
+        deleteSession: (sessionId: string, options?: { permanent?: boolean }) => Promise<{ deleted: boolean; sessionId: string; deletedSessionIds: string[]; deletedPathsCount: number; bytesFreed: number; permanent: boolean }>;
         onNotification: (listener: (message: Record<string, unknown>) => void) => () => void;
         onConnection: (listener: (state: { status: "connected" | "offline"; error?: string }) => void) => () => void;
       };

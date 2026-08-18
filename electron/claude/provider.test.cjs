@@ -123,9 +123,10 @@ test('deletes a Claude session and all recursively mapped descendants from tempo
   await fs.writeFile(path.join(projects, 'child.jsonl'), JSON.stringify({ type: 'user', uuid: 'cu1', timestamp: '2026-08-01T10:01:00.000Z', sessionId: 'child', parentSessionId: 'sess-1', cwd: '/tmp/demo', message: { role: 'user', content: 'child' } }));
   await fs.writeFile(path.join(projects, 'grandchild.jsonl'), JSON.stringify({ type: 'user', uuid: 'gu1', timestamp: '2026-08-01T10:02:00.000Z', sessionId: 'grandchild', parentSessionId: 'child', cwd: '/tmp/demo', message: { role: 'user', content: 'grandchild' } }));
   const provider = new ClaudeCodeProvider({ home: root });
-  const result = await provider.deleteSession('sess-1');
+  const result = await provider.deleteSession('sess-1', { permanent: true });
   assert.deepEqual(new Set(result.deletedSessionIds), new Set(['sess-1', 'child', 'grandchild']));
   assert.equal(result.deletedPathsCount, 3);
+  assert.equal(result.permanent, true);
   assert.equal(await fs.stat(path.join(projects, 'sess-1.jsonl')).catch(() => null), null);
   assert.equal(await fs.stat(path.join(projects, 'child.jsonl')).catch(() => null), null);
   assert.equal(await fs.stat(path.join(projects, 'grandchild.jsonl')).catch(() => null), null);
@@ -136,7 +137,7 @@ test('deletes only the selected Claude leaf and is idempotent for an already rem
   const { root, projects } = await fixture();
   await fs.writeFile(path.join(projects, 'leaf.jsonl'), JSON.stringify({ type: 'user', uuid: 'lu1', timestamp: '2026-08-01T10:01:00.000Z', sessionId: 'leaf', parentSessionId: 'sess-1', cwd: '/tmp/demo', message: { role: 'user', content: 'leaf' } }));
   const provider = new ClaudeCodeProvider({ home: root });
-  const first = await provider.deleteSession('leaf');
+  const first = await provider.deleteSession('leaf', { permanent: true });
   assert.deepEqual(first.deletedSessionIds, ['leaf']);
   assert.equal(first.deletedPathsCount, 1);
   await assert.rejects(() => provider.deleteSession('leaf'), /session not found/);
@@ -170,4 +171,51 @@ test('keeps Claude archive unsupported while exposing guarded destructive deleti
   assert.equal(provider.capabilities.delete, true);
   assert.equal(provider.capabilities.historyDestructiveDelete, true);
   await assert.rejects(() => provider.archiveSession('x'), /no supported archive API/);
+});
+
+test('sends the Claude transcript to Trash by default and leaves it on disk', async () => {
+  const { root, projects } = await fixture();
+  const trashed = [];
+  const provider = new ClaudeCodeProvider({ home: root, trash: async (filePath) => { trashed.push(filePath); } });
+  const result = await provider.deleteSession('sess-1');
+  assert.equal(result.permanent, false);
+  assert.deepEqual(trashed, [path.join(projects, 'sess-1.jsonl')]);
+  assert.ok(await fs.stat(path.join(projects, 'sess-1.jsonl')));
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('permanent: true unlinks the Claude transcript instead of trashing it', async () => {
+  const { root, projects } = await fixture();
+  const provider = new ClaudeCodeProvider({ home: root });
+  const result = await provider.deleteSession('sess-1', { permanent: true });
+  assert.equal(result.permanent, true);
+  assert.equal(await fs.stat(path.join(projects, 'sess-1.jsonl')).catch(() => null), null);
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('reports bytesFreed as the sum of every deleted transcript, including descendants', async () => {
+  const { root, projects } = await fixture();
+  await fs.writeFile(path.join(projects, 'child.jsonl'), JSON.stringify({ type: 'user', uuid: 'cu1', timestamp: '2026-08-01T10:01:00.000Z', sessionId: 'child', parentSessionId: 'sess-1', cwd: '/tmp/demo', message: { role: 'user', content: 'child transcript body with some extra bytes' } }));
+  const parentSize = (await fs.stat(path.join(projects, 'sess-1.jsonl'))).size;
+  const childSize = (await fs.stat(path.join(projects, 'child.jsonl'))).size;
+  const provider = new ClaudeCodeProvider({ home: root });
+  const result = await provider.deleteSession('sess-1', { permanent: true });
+  assert.equal(result.bytesFreed, parentSize + childSize);
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('rejects Claude deletion without a configured trash handler unless permanent is requested', async () => {
+  const { root, projects } = await fixture();
+  const provider = new ClaudeCodeProvider({ home: root });
+  await assert.rejects(() => provider.deleteSession('sess-1'), /No trash handler/);
+  assert.ok(await fs.stat(path.join(projects, 'sess-1.jsonl')));
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('propagates a Claude trash hook failure instead of reporting success', async () => {
+  const { root, projects } = await fixture();
+  const provider = new ClaudeCodeProvider({ home: root, trash: async () => { throw new Error('Trash bin unavailable'); } });
+  await assert.rejects(() => provider.deleteSession('sess-1'), /Trash bin unavailable/);
+  assert.ok(await fs.stat(path.join(projects, 'sess-1.jsonl')));
+  await fs.rm(root, { recursive: true, force: true });
 });

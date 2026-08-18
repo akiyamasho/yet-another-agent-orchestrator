@@ -133,6 +133,7 @@ class ClaudeCodeProvider extends EventEmitter {
     this.claudeDir = options.claudeDir || path.join(this.home, '.claude');
     this.projectsDir = options.projectsDir || path.join(this.claudeDir, 'projects');
     this.spawn = options.spawn || defaultSpawn;
+    this.trash = options.trash || (async () => { throw new ClaudeCodeError('No trash handler is configured; pass permanent: true to delete immediately.', { capability: 'delete' }); });
     this.children = new Map();
     this.runtimeStatuses = new Map();
     this.liveRecords = new Map();
@@ -282,9 +283,10 @@ class ClaudeCodeProvider extends EventEmitter {
 
   async archiveSession() { throw new ClaudeCodeError('Claude Code has no supported archive API; session remains recoverable in local history', { capability: 'archive', supported: false }); }
 
-  async deleteSession(sessionId) {
+  async deleteSession(sessionId, options = {}) {
     const id = String(sessionId || '').trim();
     if (!id) throw new ClaudeCodeError('A Claude session id is required for deletion.', { capability: 'delete' });
+    const permanent = options.permanent === true;
 
     // Discovery remains read-only. This explicit endpoint is the sole path that
     // may unlink provider history, and it only operates on this inventory.
@@ -370,11 +372,18 @@ class ClaudeCodeProvider extends EventEmitter {
       return value;
     };
     validated.sort((a, b) => depth(descendants.get(b.id)) - depth(descendants.get(a.id)));
+    let bytesFreed = 0;
+    for (const item of validated) {
+      if (item.missing) continue;
+      try { bytesFreed += (await fsp.stat(item.path)).size; }
+      catch { /* a file that vanished between validation and sizing contributes nothing */ }
+    }
     let deletedPathsCount = 0;
     for (const item of validated) {
       if (item.missing) continue;
       try {
-        await fsp.unlink(item.path);
+        if (permanent) await fsp.unlink(item.path);
+        else await this.trash(item.path);
         deletedPathsCount += 1;
       } catch (error) {
         if (error.code === 'ENOENT') continue;
@@ -388,7 +397,7 @@ class ClaudeCodeProvider extends EventEmitter {
       const handle = this.children.get(deletedId);
       if (handle && handle.closed) this.children.delete(deletedId);
     });
-    return { deleted: true, sessionId: id, deletedSessionIds, deletedPathsCount };
+    return { deleted: true, sessionId: id, deletedSessionIds, deletedPathsCount, bytesFreed, permanent };
   }
 }
 

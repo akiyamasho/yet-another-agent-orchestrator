@@ -63,7 +63,7 @@ contextBridge.exposeInMainWorld("constellationDesktop", {
     updateSession: (input) => ipcRenderer.invoke("claude:update-session", input),
     archiveSession: (sessionId) => ipcRenderer.invoke("claude:archive-session", sessionId),
     unarchiveSession: (sessionId) => ipcRenderer.invoke("claude:unarchive-session", sessionId),
-    deleteSession: (sessionId) => ipcRenderer.invoke("claude:delete-session", sessionId),
+    deleteSession: (sessionId, options) => ipcRenderer.invoke("claude:delete-session", sessionId, options),
     onNotification: (listener) => {
       const handler = (_event, message) => listener(message);
       ipcRenderer.on("claude:notification", handler);

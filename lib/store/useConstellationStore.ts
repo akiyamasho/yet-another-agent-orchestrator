@@ -34,7 +34,7 @@ type Store = NormalizedState & {
   updateThread: (id: string, patch: Partial<AgentThread>) => Promise<AgentThread>;
   archiveThread: (id: string, strategy?: "tree" | "reparent") => Promise<void>;
   unarchiveThread: (id: string) => Promise<void>;
-  deleteThread: (id: string) => Promise<void>;
+  deleteThread: (id: string, options?: { permanent?: boolean }) => Promise<{ deleted: boolean; sessionId: string; deletedSessionIds: string[]; deletedPathsCount: number; bytesFreed: number; permanent: boolean } | undefined>;
   addEvent: (event: AgentEvent) => void;
   filteredThreads: () => AgentThread[];
 };
@@ -192,16 +192,20 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
     if (desktop) { const { provider, rawId } = splitProviderThreadId(threadId); if (provider === "claude") await desktop.claude.unarchiveSession(rawId); else await desktop.codex.unarchiveThread(rawId); await get().syncFromSource(); return; }
     set((state) => ({ threads: { ...state.threads, [threadId]: { ...state.threads[threadId], archived: false } } }));
   },
-  deleteThread: async (threadId) => {
+  deleteThread: async (threadId, options) => {
     const desktop = window.constellationDesktop;
     if (desktop) {
       const thread = get().threads[threadId];
-      if (!thread) return;
+      if (!thread) return undefined;
       const { provider, rawId } = splitProviderThreadId(threadId);
-      if (provider === "claude") await desktop.claude.deleteSession(rawId);
-      else await desktop.codex.deleteThread(rawId);
+      if (provider === "claude") {
+        const result = await desktop.claude.deleteSession(rawId, { permanent: options?.permanent === true });
+        await get().syncFromSource();
+        return result;
+      }
+      await desktop.codex.deleteThread(rawId);
       await get().syncFromSource();
-      return;
+      return undefined;
     }
     set((state) => {
       const ids = descendantThreadIds(state, threadId);
@@ -212,6 +216,7 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
       const selectedThreadId = state.selectedThreadId && ids.has(state.selectedThreadId) ? undefined : state.selectedThreadId;
       return { threads, events, selectedThreadId };
     });
+    return undefined;
   },
   addEvent: (event) => set((state) => ({ events: { ...state.events, [event.id]: event } })),
   filteredThreads: () => {

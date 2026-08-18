@@ -268,7 +268,7 @@ function createCodexBridge() {
 }
 
 function createClaudeProvider() {
-  const provider = new ClaudeCodeProvider({ command: findClaudeBinary(), home: app.getPath("home") });
+  const provider = new ClaudeCodeProvider({ command: findClaudeBinary(), home: app.getPath("home"), trash: (filePath) => shell.trashItem(filePath) });
   provider.on("event", (event) => {
     const sessionId = event.sessionId || event.session_id;
     if (sessionId) {
@@ -532,8 +532,8 @@ function registerIpc() {
   ipcMain.handle("claude:update-session", (_event, input) => updateClaudeSessionState(String(input.sessionId), { title: String(input.title || "").trim() || undefined }));
   ipcMain.handle("claude:archive-session", (_event, sessionId) => updateClaudeSessionState(String(sessionId), { archived: true }));
   ipcMain.handle("claude:unarchive-session", (_event, sessionId) => updateClaudeSessionState(String(sessionId), { archived: false }));
-  ipcMain.handle("claude:delete-session", async (_event, sessionId) => {
-    const result = await ensureClaude().deleteSession(String(sessionId));
+  ipcMain.handle("claude:delete-session", async (_event, sessionId, options) => {
+    const result = await ensureClaude().deleteSession(String(sessionId), { permanent: options?.permanent === true });
     clearClaudeSessionState(result.deletedSessionIds);
     return result;
   });
