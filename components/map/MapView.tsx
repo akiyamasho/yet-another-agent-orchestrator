@@ -39,11 +39,14 @@ function StatusGlyph({ status }: { status: ThreadStatus }) {
 const providerMeta = {
   codex: { label: "Codex", short: "C", color: "#7aa7b8" },
   claude: { label: "Claude Code", short: "A", color: "#d97757" },
-  pi: { label: "Pi tickets", short: "PI", color: "#c49a6c" },
+  pi: { label: "Pi orchestration", short: "PI", color: "#c49a6c" },
 } as const;
 
 function getProvider(thread: AgentThread) {
   return providerMeta[thread.provider ?? "codex"];
+}
+function piPhaseLabel(thread: AgentThread) {
+  return thread.runPhase === "planning" || thread.runPhase === "planner" ? "PLANNER" : thread.runPhase === "reviewer" ? "REVIEWER" : "WORKER";
 }
 
 function ConstellationHandles({ target = true, source = true }: { target?: boolean; source?: boolean }) {
@@ -55,29 +58,35 @@ function ConstellationHandles({ target = true, source = true }: { target?: boole
 
 function FolderNode({ data }: NodeProps<MapNode>) {
   const { folder, count, live, recent, attention, onSelect } = data as FolderNodeData;
-  const folderThreads = Object.values(useConstellationStore.getState().threads).filter((thread) => !thread.archived && thread.folderId === folder.id);
+  const threadRecord = useConstellationStore((state) => state.threads);
+  const schedulerRecord = useConstellationStore((state) => state.piScheduler);
+  const folderThreads = Object.values(threadRecord).filter((thread) => !thread.archived && thread.folderId === folder.id);
+  const scheduler = schedulerRecord[folder.path];
   const codexCount = folderThreads.filter((thread) => (thread.provider ?? "codex") === "codex").length;
   const claudeCount = folderThreads.filter((thread) => thread.provider === "claude").length;
   const piCount = folderThreads.filter((thread) => thread.provider === "pi").length;
   const liveLabel = `${live} live`;
   const recentLabel = `${recent} recent`;
   const attentionLabel = `${attention} needs you`;
-  return <button className={`${styles.folderNode} ${live ? styles.folderLive : ""} ${attention ? styles.folderNeedsAttention : ""}`} style={{ "--accent": folder.accent } as React.CSSProperties} onClick={onSelect} aria-label={`Focus ${folder.name} folder, ${codexCount} Codex, ${claudeCount} Claude Code, and ${piCount} Pi ticket tasks, ${liveLabel}, ${recentLabel}, ${attentionLabel}`}>
+  const piTickets = folderThreads.filter((thread) => thread.provider === "pi" && thread.piKind === "ticket");
+  const completed = piTickets.reduce((sum, thread) => sum + (thread.progress?.completed ?? 0), 0);
+  const total = piTickets.reduce((sum, thread) => sum + (thread.progress?.total ?? 0), 0);
+  return <button className={`${styles.folderNode} ${live ? styles.folderLive : ""} ${attention ? styles.folderNeedsAttention : ""}`} style={{ "--accent": folder.accent } as React.CSSProperties} onClick={onSelect} aria-label={`Focus ${folder.name} folder, ${codexCount} Codex, ${claudeCount} Claude Code, and ${piCount} Pi tickets or runs, ${liveLabel}, ${recentLabel}, ${attentionLabel}`}>
     <ConstellationHandles/>
     <span className={styles.folderOrbit} />
     <span className={styles.folderGlyph}><Sparkles size={20} /></span>
     <strong>{folder.name}</strong>
     <small>{count} {count === 1 ? "thread" : "threads"}</small>
     <span className={styles.folderStateSummary} aria-label={`${liveLabel}, ${recentLabel}, ${attentionLabel}`}><span className={styles.folderLiveCount}>{liveLabel}</span><span className={styles.folderRecentCount}>{recentLabel}</span><span className={styles.folderAttentionCount}>{attentionLabel}</span></span>
-    <span className={styles.providerCounts}><span className={styles.codexMark}>C {codexCount}</span><span className={styles.claudeMark}>A {claudeCount}</span><span className={styles.piMark}>PI {piCount}</span></span>
+    <span className={styles.providerCounts}><span className={styles.codexMark}>C {codexCount}</span><span className={styles.claudeMark}>A {claudeCount}</span><span className={styles.piMark}>PI {piCount}</span></span>{total > 0 && <span className={styles.folderProgress}><progress max={total} value={completed} aria-label={`${folder.name} Pi checklist progress`} />{completed}/{total} checklist</span>}<span className={styles.queueStatus}>{scheduler?.enabled ? `Queue on · ${scheduler.running} running` : "Queue paused"}</span>
   </button>;
 }
 
 function WorkspaceNode({ data }: NodeProps<MapNode>) {
   const { folderCount, threadCount } = data as WorkspaceNodeData;
-  return <div className={styles.workspaceNode} aria-label={`${folderCount} projects and ${threadCount} agent tasks`}>
+  return <div className={styles.workspaceNode} aria-label={`${folderCount} projects and ${threadCount} tasks`}>
     <ConstellationHandles target={false}/>
-    <span><Sparkles size={23}/></span><strong>Local agents</strong><small>{folderCount} projects · {threadCount} tasks</small>
+    <span><Sparkles size={23}/></span><strong>Local work</strong><small>{folderCount} projects · {threadCount} tasks</small>
   </div>;
 }
 
@@ -91,7 +100,7 @@ function ThreadNode({ data }: NodeProps<MapNode>) {
     <ConstellationHandles/>
     <span className={styles.statusRing}><StatusGlyph status={thread.status} /></span>
     <span className={styles.providerBadge} style={{ color: provider.color, borderColor: provider.color }} title={provider.label}>{provider.short}</span>
-    <span className={styles.threadCopy}><strong>{thread.title}</strong><small>{thread.key} · {provider.label} · {statusLabel[thread.status]}</small><span className={styles.statePill}>{thread.status === "running" && liveness.state === "active" && <span className={styles.liveBeacon} aria-hidden="true" />}{stateLabel}</span></span>
+    <span className={styles.threadCopy}><strong>{thread.title}</strong><small>{thread.piKind === "run" ? piPhaseLabel(thread) : thread.key} · {provider.label} · {statusLabel[thread.status]}</small><span className={styles.statePill}>{thread.status === "running" && liveness.state === "active" && <span className={styles.liveBeacon} aria-hidden="true" />}{stateLabel}</span></span>
     {thread.attention && <span className={styles.attentionBadge} aria-label="Attention required">!</span>}
   </button>;
 }

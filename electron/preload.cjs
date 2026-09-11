@@ -55,10 +55,17 @@ contextBridge.exposeInMainWorld("constellationDesktop", {
   pi: {
     getSnapshot: () => ipcRenderer.invoke("pi:snapshot"),
     readTicket: (filePath) => ipcRenderer.invoke("pi:read-ticket", filePath),
+    readRun: (runId) => ipcRenderer.invoke("pi:read-run", runId),
     createTicket: (input) => ipcRenderer.invoke("pi:create-ticket", input),
     updateTicket: (input) => ipcRenderer.invoke("pi:update-ticket", input),
     dispatch: (filePath) => ipcRenderer.invoke("pi:dispatch", filePath),
     interrupt: (filePath) => ipcRenderer.invoke("pi:interrupt", filePath),
+    plan: (input) => ipcRenderer.invoke("pi:plan", input),
+    startQueue: (root) => ipcRenderer.invoke("pi:queue-start", root),
+    stopQueue: (root) => ipcRenderer.invoke("pi:queue-stop", root),
+    queueStatus: (root) => ipcRenderer.invoke("pi:queue-status", root),
+    dispatchNext: (root) => ipcRenderer.invoke("pi:dispatch-next", root),
+    retry: (filePath) => ipcRenderer.invoke("pi:retry", filePath),
   },
   claude: {
     getSnapshot: () => ipcRenderer.invoke("claude:snapshot"),

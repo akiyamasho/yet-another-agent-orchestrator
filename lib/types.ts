@@ -14,8 +14,23 @@ export interface AgentThread {
   recentlyActiveExternally?: boolean;
   /** The runtime that owns this task. Optional for backwards-compatible local/demo records. */
   provider?: AgentProvider;
+  /** Pi distinguishes Markdown tickets from persisted planner/worker/reviewer runs. */
+  piKind?: "ticket" | "run";
+  ticketState?: string;
+  runId?: string;
+  runPhase?: string;
+  progress?: { completed: number; total: number };
+  projectRoot?: string;
+  workspace?: string;
+  error?: string;
   attention?: { kind: AttentionKind; message: string };
+  issue?: string;
+  duplicateId?: boolean;
+  missingBlocker?: string;
+  ticketPath?: string;
   acceptanceCriteria?: { text: string; completed: boolean; line?: number }[];
+  assignee?: string;
+  blockedBy?: string[];
 }
 export interface AgentEvent { id: string; threadId: string; parentEventId?: string; type: EventType; title: string; detail?: string; timestamp: string; }
 export interface NormalizedState { folders: Record<string, FolderContext>; threads: Record<string, AgentThread>; events: Record<string, AgentEvent>; }

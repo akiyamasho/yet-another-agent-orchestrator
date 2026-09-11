@@ -34,7 +34,7 @@ const providerMeta: Record<
 > = {
     codex: { label: "Codex", short: "C", color: "#7aa7b8" },
     claude: { label: "Claude Code", short: "CC", color: "#d97757" },
-    pi: { label: "Pi tickets", short: "PI", color: "#c49a6c" }
+    pi: { label: "Pi orchestration", short: "PI", color: "#c49a6c" }
 };
 const statusLabels: Record<ThreadStatus, string> = {
     running: "Running",
@@ -50,6 +50,14 @@ function providerFor(thread: AgentThread): AgentProvider {
         thread.provider ??
         (thread.id.startsWith("claude:") ? "claude" : "codex")
     );
+}
+
+function piPhaseLabel(thread: AgentThread) {
+    return thread.runPhase === "planning" || thread.runPhase === "planner"
+        ? "PLANNER"
+        : thread.runPhase === "reviewer"
+          ? "REVIEWER"
+          : "WORKER";
 }
 
 function timestampFor(thread: AgentThread, latestEventTimestamp?: string) {
@@ -212,8 +220,8 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
                         <span className={styles.projectCount}>
                             {project.activities.length}{" "}
                             {project.activities.length === 1
-                                ? "agent"
-                                : "agents"}
+                                ? "task"
+                                : "tasks"}
                         </span>
                     </div>
                     {providers.map(({ provider, items: providerItems }) => (
@@ -303,16 +311,21 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
                                                             styles.context
                                                         }
                                                     >
-                                                        {parent ? (
+                                                        {thread.piKind === "run" ? (
                                                             <>
                                                                 <RotateCcw aria-hidden="true" />{" "}
-                                                                Subagent of{" "}
+                                                                {piPhaseLabel(thread)} run{parent ? ` for ${parent.title}` : " for this project"}
+                                                            </>
+                                                        ) : parent ? (
+                                                            <>
+                                                                <RotateCcw aria-hidden="true" />{" "}
+                                                                Child task of{" "}
                                                                 {parent.title}
                                                             </>
                                                         ) : (
                                                             <>
                                                                 <ArrowUpRight aria-hidden="true" />{" "}
-                                                                Root agent
+                                                                Root task
                                                             </>
                                                         )}
                                                     </span>
@@ -358,7 +371,7 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
                     <p className={styles.kicker}>Operations / live pulse</p>
                     <h2 id="now-heading">Now</h2>
                     <p className={styles.subtle}>
-                        Running agents and the sessions most ready to resume,
+                        Running tasks and persisted runs most ready to resume,
                         grouped by project.
                     </p>
                 </div>
@@ -390,10 +403,10 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
                     <div className={styles.empty}>
                         <Radio aria-hidden="true" />
                         <p>
-                            <strong>No agents are running right now.</strong>
+                            <strong>No tasks are running right now.</strong>
                             <span>
-                                Start an agent from a project, or check Recently
-                                active to resume the latest work.
+                                Dispatch a ticket or start an agent task, then check
+                                Recently active to resume the latest work.
                             </span>
                         </p>
                     </div>
@@ -407,7 +420,7 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
                     <div>
                         <h3 id="recent-heading">Recently active</h3>
                         <p>
-                            The latest 16 non-running agents, ordered by
+                            The latest 16 non-running tasks and runs, ordered by
                             activity.
                         </p>
                     </div>
@@ -419,7 +432,7 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
                     <div className={styles.empty}>
                         <Clock3 aria-hidden="true" />
                         <p>
-                            <strong>No recent agents match this view.</strong>
+                            <strong>No recent tasks match this view.</strong>
                             <span>
                                 Try clearing the search or project filter.
                             </span>

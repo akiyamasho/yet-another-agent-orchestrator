@@ -1,7 +1,7 @@
 import type { AgentEvent, AgentThread, FolderContext, NormalizedState } from "@/lib/types";
 
 export const mockFolders: FolderContext[] = [
-  { id: "folder-agent-orchestration", name: "agent-orchestration", path: "~/Desktop/dev/research/agent-orchestration", accent: "#67e8f9", defaultPermission: "workspace-write" },
+  { id: "folder-agent-orchestration", name: "agent-orchestration", path: "~/Demo/constellation-sample-project", accent: "#67e8f9", defaultPermission: "workspace-write" },
   { id: "folder-studio-site", name: "studio-site", path: "~/Projects/studio-site", accent: "#a78bfa", defaultPermission: "workspace-write" },
   { id: "folder-mobile-lab", name: "mobile-lab", path: "~/Projects/mobile-lab", accent: "#fb7185", defaultPermission: "read-only" },
   { id: "folder-signal-research", name: "signal-research", path: "~/Desktop/research/signal", accent: "#fbbf24", defaultPermission: "read-only" },

@@ -1,6 +1,6 @@
 # Yet Another Agent Orchestrator
 
-**Constellation** is a local-first Electron command center for real Codex and Claude Code projects, tasks, chats, and subagents. It combines a cinematic spatial map with practical list, activity, search, task, transcript, changed-file, image-preview, and Reveal-in-Finder workflows.
+**Constellation** is a local-first Electron command center for real Codex and Claude Code projects, tasks, chats, and subagents. It also turns Pi Markdown tickets into executable work: Sol helps shape objectives, a persistent bounded queue schedules work, and Luna workers/reviewers run and inspect the resulting nodes. It combines a cinematic spatial map with practical list, activity, search, task, transcript, changed-file, image-preview, and Reveal-in-Finder workflows.
 
 No local web server is needed after installation.
 
@@ -36,6 +36,9 @@ No local web server is needed after installation.
 - Provider identity everywhere: Codex is projector blue; Claude Code is warm coral.
 - Real Codex task discovery, transcript reads, live notifications, start, task-name updates, settings, archive, restore, and delete through `codex app-server`.
 - Real Claude Code project/session discovery, transcript reads, start, resume, and bounded subagent delegation through the local `claude` CLI.
+- Pi Markdown tickets can be discovered, queued, retried, resumed, and tracked as work nodes. A persistent bounded queue survives restarts and makes dependencies, retry limits, sessions, and worktree assignments explicit.
+- Sol objective planning turns a requested outcome into an inspectable plan; Luna workers execute eligible nodes and Luna reviewers record review/progress state. Run nodes expose the current objective, worker session, attempts, dependencies, worktree, and progress rather than hiding orchestration in a black box.
+- The queue is deliberately bounded and local: it does not claim automatic worktree merging, and this release is not full Symphony parity.
 - Continue any selected main task or subagent in the **Chat** tab, with chronological provider-native transcript refresh, auto-pinned latest-message scrolling, `Enter` to send, local file attachments, and direct `⌘V` clipboard-image attachments.
 - Steer an active Codex turn or stop-and-resume the latest Claude Code input; a visible stop button and `Escape` handle cancellation. Archive remains reversible presentation state, while typed-confirmation **Delete permanently** uses Codex `thread/delete` or guarded Claude transcript removal, moving files to the Trash by default (with an explicit permanent-delete option) and reporting freed disk space, and always cascades from a main agent to its subagents.
 - Inline Codex and Claude Code messages, reasoning/progress, plans, commands, tools, subagents, changed files, results, and image artifacts without flattening the conversation into a generic output list.
@@ -77,7 +80,7 @@ Security disclaimer: `xattr -dr com.apple.quarantine` bypasses macOS’s first-l
 
 Version 0.2.0 is a one-time manual install because older versions do not contain the updater. From 0.2.0 onward, open **Settings → Software updates** to check GitHub Releases, download the matching Apple Silicon ZIP, verify its published SHA-256, and install it in place. This often avoids repeating a browser-download quarantine step, but it does not make the unsigned app signed or notarized; macOS may still apply local security policy.
 
-Requirements at runtime: a working local `codex` installation, a working local `claude` installation, or both. A provider can be offline while the other remains usable.
+Requirements at runtime: macOS, a working local `codex` installation, a working local `claude` installation, or both. Pi ticket orchestration additionally requires the local Pi CLI/runtime and a project with Markdown tickets; Sol and Luna use the configured local sessions and worktrees. A provider or orchestration runtime can be offline while the other remains usable.
 
 ## Develop
 

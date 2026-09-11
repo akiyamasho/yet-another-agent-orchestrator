@@ -13,6 +13,7 @@ import styles from "./InspectorPanel.module.css";
 type InspectorTab = "overview" | "subagents" | "activity" | "chat";
 const statusLabel: Record<ThreadStatus, string> = { running: "Running", waiting: "Waiting", needs_attention: "Needs attention", completed: "Completed", failed: "Failed", idle: "Idle" };
 const formatTime = (iso?: string) => iso ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(iso)) : "—";
+const piPhaseLabel = (phase?: string) => phase === "planning" || phase === "planner" ? "PLANNER" : phase === "reviewer" ? "REVIEWER" : "WORKER";
 
 export interface InspectorPanelProps { threadId?: string; isMapView?: boolean; onBackToNow?: () => void; onClose?: () => void; onAddSubagent?: (threadId: string) => void; onEdit?: (threadId: string) => void; onArchive?: (threadId: string) => void; onDelete?: (threadId: string) => void; }
 
@@ -22,6 +23,7 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
   const [detail, setDetail] = useState<unknown>();
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string>();
+  const [runActionError, setRunActionError] = useState<string>();
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [focusedPreview, setFocusedPreview] = useState<{ path: string; dataUrl: string; name: string }>();
   const previewRequests = useRef(new Set<string>());
@@ -53,8 +55,8 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
   // landing tab even when the previous agent was left on Overview, Subagents,
   // or Activity (including immediately after creating a new agent).
   useEffect(() => {
-    if (selectedThreadId) setTab("chat");
-  }, [selectedThreadId]);
+    if (selectedThreadId) setTab(thread?.piKind === "run" ? "activity" : "chat");
+  }, [selectedThreadId, thread?.piKind]);
 
   const timeline = useMemo(() => {
     const source = detail && typeof detail === "object" && "items" in detail && Array.isArray((detail as ChatTimeline).items) ? detail as ChatTimeline : connectionStatus === "demo" && thread ? demoTimeline(thread.provider ?? "codex", thread.id, thread.status) : undefined;
@@ -92,7 +94,7 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
     setDetailError(undefined);
     const { rawId } = splitProviderThreadId(selectedThreadId);
     try {
-      const response = threadProvider === "pi" ? await window.constellationDesktop.pi.readTicket(rawId) : threadProvider === "claude" ? await window.constellationDesktop.claude.readSession(rawId) : await window.constellationDesktop.codex.readThread(rawId);
+      const response = threadProvider === "pi" ? thread?.piKind === "run" ? await window.constellationDesktop.pi.readRun(thread.runId || rawId.replace(/^run:/, "")) : await window.constellationDesktop.pi.readTicket(rawId) : threadProvider === "claude" ? await window.constellationDesktop.claude.readSession(rawId) : await window.constellationDesktop.codex.readThread(rawId);
       if (activeRequest.current === request) applyDetail(response);
     } catch (error) {
       if (activeRequest.current === request) setDetailError(error instanceof Error ? error.message : String(error));
@@ -242,45 +244,54 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
   const action = (next: ThreadStatus) => void updateThread(thread.id, { status: next, summary: next === "running" ? "Resumed and working through the next bounded task." : next === "completed" ? "Marked complete." : thread.summary });
   const runPiTicket = async () => {
     if (!selectedThreadId || thread.provider !== "pi" || !window.constellationDesktop) return;
-    const { rawId } = splitProviderThreadId(selectedThreadId);
-    setThreadRuntimeStatus(selectedThreadId, "running");
-    await window.constellationDesktop.pi.dispatch(rawId);
-    await syncFromSource();
-    window.setTimeout(() => void refreshDetail(false), 700);
+    setRunActionError(undefined);
+    try {
+      const { rawId } = splitProviderThreadId(selectedThreadId);
+      if (thread.piKind === "run") {
+        if (!thread.runId || thread.runPhase === "planning") throw new Error("Planner runs cannot be retried as ticket work.");
+        await window.constellationDesktop.pi.retry(thread.runId);
+      } else await window.constellationDesktop.pi.dispatch(rawId);
+      await syncFromSource();
+      window.setTimeout(() => void refreshDetail(false), 700);
+    } catch (error) { setRunActionError(error instanceof Error ? error.message : String(error)); }
   };
   const stopPiTicket = async () => {
     if (!selectedThreadId || thread.provider !== "pi" || !window.constellationDesktop) return;
-    const { rawId } = splitProviderThreadId(selectedThreadId);
-    await window.constellationDesktop.pi.interrupt(rawId);
-    setThreadRuntimeStatus(selectedThreadId, "waiting");
-    await syncFromSource();
-    window.setTimeout(() => void refreshDetail(false), 400);
+    setRunActionError(undefined);
+    try {
+      const { rawId } = splitProviderThreadId(selectedThreadId);
+      if (thread.piKind === "run") await window.constellationDesktop.pi.interrupt(thread.runId || rawId.replace(/^run:/, "")); else await window.constellationDesktop.pi.interrupt(rawId);
+      await syncFromSource();
+      window.setTimeout(() => void refreshDetail(false), 400);
+    } catch (error) { setRunActionError(error instanceof Error ? error.message : String(error)); }
   };
   const attention = thread.attention && !attentionDone;
+  const dispatchablePiTicket = thread.piKind === "ticket" && ["todo", "idle", "waiting", "retrying"].includes(thread.ticketState || "");
 
   return <aside className={styles.panel} aria-label={`Inspector for ${thread.title}`} style={{ "--accent": provider.color } as React.CSSProperties} onKeyDownCapture={handleInspectorKeyDownCapture}>
     <div className={styles.header}>
       <div className={styles.context}><span className={styles.dot} /> <span>{folder.name}</span><span className={styles.path}>{folder.path}</span></div>
       <button className={styles.iconButton} onClick={onClose} aria-label="Close inspector"><X size={17} /></button>
-      <p className={styles.key}><span className={styles.provider} style={{ color: provider.color, borderColor: `${provider.color}66` }}>{provider.shortLabel}</span>{thread.key}</p><h2>{thread.title}</h2>
+      <p className={styles.key}>{thread.provider === "pi" && <span className={styles.provider}>{thread.piKind === "run" ? piPhaseLabel(thread.runPhase) : "TICKET"}</span>}<span className={styles.provider} style={{ color: provider.color, borderColor: `${provider.color}66` }}>{provider.shortLabel}</span>{thread.key}</p><h2>{thread.title}</h2>
       <div className={styles.meta}><span className={`${styles.status} ${styles[thread.status]} ${liveness.state === "possibly_stalled" ? styles.possiblyStalled : liveness.state === "quiet" ? styles.quiet : ""}`}><i />{displayedStatus}</span><span><Clock3 size={13} /> {formatTime(thread.startedAt)}</span><span>{thread.model}</span><span>{thread.reasoningEffort}</span></div>
       {thread.status === "running" && liveness.state !== "active" && liveness.state !== "unknown" && <div className={`${styles.livenessNotice} ${liveness.state === "possibly_stalled" ? styles.stalledNotice : ""}`} role="status"><CircleAlert size={14}/><span><strong>{formatLivenessNotice(liveness)}</strong>. This may be a long-running command; inspect the original {provider.label} task if it needs attention.</span></div>}
+      {runActionError && <p className={styles.error} role="alert">{runActionError} <button type="button" onClick={() => setRunActionError(undefined)}>Dismiss</button></p>}
       <div className={styles.actions}>
         {isMapView && onBackToNow && <button className={styles.primary} onClick={onBackToNow}><RotateCcw size={14}/> Back to Now</button>}
-        {thread.provider === "pi" && live ? (thread.status === "running" ? <button className={styles.danger} onClick={() => void stopPiTicket()}><Square size={13}/> Stop Pi run</button> : <button className={styles.primary} onClick={() => void runPiTicket()}><Play size={14}/> Dispatch Luna</button>) : null}
+        {thread.provider === "pi" && live ? (thread.piKind === "run" ? (thread.runPhase !== "planning" && (thread.status === "running" ? <button className={styles.danger} onClick={() => void stopPiTicket()}><Square size={13}/> Interrupt run</button> : <button className={styles.primary} onClick={() => void runPiTicket()}><RotateCcw size={14}/> Retry run</button>)) : (thread.status === "running" ? <button className={styles.danger} onClick={() => void stopPiTicket()}><Square size={13}/> Interrupt worker</button> : dispatchablePiTicket ? <button className={styles.primary} onClick={() => void runPiTicket()}><Play size={14}/> Dispatch ticket</button> : null)) : null}
         {!live && (thread.status === "running" ? <><button onClick={() => action("waiting")}><Pause size={14}/> Pause</button><button className={styles.danger} onClick={() => action("idle")}><Square size={13}/> Stop</button></> : <button className={styles.primary} onClick={() => action("running")}><Play size={14}/> {thread.status === "waiting" ? "Resume" : "Run again"}</button>)}
-        <button onClick={() => onEdit?.(thread.id)}>Rename / edit</button>{thread.provider !== "pi" && <button onClick={() => onArchive?.(thread.id)}>Archive</button>}<button className={styles.danger} onClick={() => onDelete?.(thread.id)}>Delete permanently</button>
+        {thread.piKind !== "run" && <><button onClick={() => onEdit?.(thread.id)}>Rename / edit</button>{thread.provider !== "pi" && <button onClick={() => onArchive?.(thread.id)}>Archive</button>}<button className={styles.danger} onClick={() => onDelete?.(thread.id)}>Delete permanently</button></>}
       </div>
     </div>
     {attention && <section className={styles.attention} aria-live="polite"><div className={styles.attentionTitle}><CircleAlert size={17}/> Action required</div><strong>{thread.attention?.kind === "approval" ? "Approval requested" : "Input needed"}</strong><p>{thread.attention?.message}</p><small>From {thread.title} · {thread.permission}</small>{live ? <p className={styles.liveNotice}>Respond in the original {provider.label} task. Constellation keeps this read-only until the provider reports the response.</p> : <div className={styles.attentionActions}><button className={styles.primary} onClick={() => setAttentionDone(true)}>Approve once</button><button onClick={() => setAttentionDone(true)}>Always allow…</button><button className={styles.reject} onClick={() => { setAttentionDone(true); action("failed"); }}>Reject</button></div>}</section>}
-    <nav className={styles.tabs} aria-label="Inspector sections">{(["chat", "overview", "subagents", "activity"] as InspectorTab[]).map((name) => <button key={name} className={tab === name ? styles.activeTab : ""} onClick={() => setTab(name)} aria-selected={tab === name} role="tab">{name[0].toUpperCase() + name.slice(1)}{name === "subagents" && children.length ? <b>{children.length}</b> : null}</button>)}</nav>
+    <nav className={styles.tabs} aria-label="Inspector sections">{((thread.piKind === "run" ? ["overview", "activity"] : ["chat", "overview", "subagents", "activity"]) as InspectorTab[]).map((name) => <button key={name} className={tab === name ? styles.activeTab : ""} onClick={() => setTab(name)} aria-selected={tab === name} role="tab">{name[0].toUpperCase() + name.slice(1)}{name === "subagents" && children.length ? <b>{children.length}</b> : null}</button>)}</nav>
     <div ref={bodyRef} className={styles.body} role="tabpanel">
-      {tab === "overview" && <><section className={styles.card}><label>Objective</label><p className={styles.objective}>{thread.objective}</p><label>What it is doing now</label><p>{thread.summary}</p>{thread.provider === "pi" && thread.acceptanceCriteria?.length ? <div><label>Ticket progress</label><div className={styles.ticketProgress}><progress max={thread.acceptanceCriteria.length} value={thread.acceptanceCriteria.filter((item) => item.completed).length} aria-label={`${thread.title} progress`} /><strong>{thread.acceptanceCriteria.filter((item) => item.completed).length}/{thread.acceptanceCriteria.length}</strong></div><label>Acceptance criteria</label>{thread.acceptanceCriteria.map((item) => <p key={`${item.line}-${item.text}`}><span aria-hidden="true">{item.completed ? "☑" : "☐"}</span> {item.text}</p>)}</div> : null}</section><dl className={styles.details}><div><dt>Provider</dt><dd style={{ color: provider.color }}>{provider.label}</dd></div><div><dt>Parent thread</dt><dd>{thread.parentId ? <button className={styles.link} onClick={() => selectThread(thread.parentId)}>{threads[thread.parentId]?.key ?? "Unknown"}<ChevronRight size={13}/></button> : "Root task"}</dd></div><div><dt>Permission mode</dt><dd>{thread.permission}</dd></div><div><dt>Branch / worktree</dt><dd>{thread.branch ?? "No branch"}</dd></div></dl></>}
+      {tab === "overview" && <><section className={styles.card}>{thread.piKind === "run" ? <><label>Run details</label><p>{piPhaseLabel(thread.runPhase)} · {thread.model}</p><p>{thread.workspace || thread.projectRoot}</p><p>{thread.branch || "No branch"}</p>{thread.error && <p role="alert">{thread.error}</p>}</> : null}<label>Objective</label><p className={styles.objective}>{thread.objective || "No objective provided."}</p><label>What it is doing now</label><p>{thread.summary}</p>{thread.provider === "pi" && thread.acceptanceCriteria?.length ? <div><label>Ticket progress</label><div className={styles.ticketProgress}><progress max={thread.acceptanceCriteria.length} value={thread.acceptanceCriteria.filter((item) => item.completed).length} aria-label={`${thread.title} progress`} /><strong>{thread.acceptanceCriteria.filter((item) => item.completed).length}/{thread.acceptanceCriteria.length}</strong></div><label>Acceptance criteria</label>{thread.acceptanceCriteria.map((item) => <p key={`${item.line}-${item.text}`}><span aria-hidden="true">{item.completed ? "☑" : "☐"}</span> {item.text}</p>)}</div> : null}</section><dl className={styles.details}><div><dt>Provider</dt><dd style={{ color: provider.color }}>{provider.label}</dd></div><div><dt>Parent thread</dt><dd>{thread.parentId ? <button className={styles.link} onClick={() => selectThread(thread.parentId)}>{threads[thread.parentId]?.key ?? "Unknown"}<ChevronRight size={13}/></button> : "Root task"}</dd></div><div><dt>Permission mode</dt><dd>{thread.permission}</dd></div><div><dt>Branch / worktree</dt><dd>{thread.branch ?? "No branch"}</dd></div>{thread.provider === "pi" && thread.piKind === "ticket" && <><div><dt>Ticket state</dt><dd>{thread.ticketState || statusLabel[thread.status]}</dd></div><div><dt>Assignee</dt><dd>{thread.assignee ?? "Unassigned"}</dd></div><div><dt>Blocked by</dt><dd>{thread.blockedBy?.length ? thread.blockedBy.join(", ") : "No dependencies"}</dd></div><div><dt>Issue</dt><dd>{thread.issue || "No ticket issues"}</dd></div></>}</dl></>}
       {tab === "subagents" && <section className={styles.listSection}><div className={styles.sectionHeading}><h3>Child threads</h3><button className={styles.primary} onClick={() => onAddSubagent?.(thread.id)}>Add subagent</button></div>{children.length ? children.map((child) => <button className={styles.child} key={child.id} onClick={() => selectThread(child.id)}><span className={`${styles.statusDot} ${styles[child.status]}`} /><span><strong>{child.title}</strong><small>{child.key} · {child.summary}</small></span><ChevronRight size={15}/></button>) : <p className={styles.empty}>No child threads yet. Add a bounded task to delegate through {provider.label}.</p>}</section>}
       {tab === "activity" && <section className={styles.timeline}>{activity.length ? activity.map((event) => <article key={event.id}><span className={`${styles.eventDot} ${styles[event.type]}`} /><div><strong>{event.title}</strong><p>{event.detail}</p><time>{formatTime(event.timestamp)}</time></div></article>) : <p className={styles.empty}>No activity recorded for this thread.</p>}</section>}
-      {tab === "chat" && <section ref={chatOutputRef} className={styles.output}>{focusedPreview && <div className={styles.focusedPreview}><button onClick={() => setFocusedPreview(undefined)} aria-label="Close image preview"><X size={14}/></button><img src={focusedPreview.dataUrl} alt={focusedPreview.name}/><div><strong>{focusedPreview.name}</strong><small>{focusedPreview.path}</small><button onClick={() => void reveal(focusedPreview.path)}>Reveal in Finder</button></div></div>}<AgentChatTimeline timeline={timeline} liveness={liveness} provider={thread.provider ?? "codex"} loading={detailLoading} error={detailError} previews={previews} onPreview={handlePreview} onReveal={handleReveal} /></section>}
+      {tab === "chat" && thread.piKind !== "run" && <section ref={chatOutputRef} className={styles.output}>{focusedPreview && <div className={styles.focusedPreview}><button onClick={() => setFocusedPreview(undefined)} aria-label="Close image preview"><X size={14}/></button><img src={focusedPreview.dataUrl} alt={focusedPreview.name}/><div><strong>{focusedPreview.name}</strong><small>{focusedPreview.path}</small><button onClick={() => void reveal(focusedPreview.path)}>Reveal in Finder</button></div></div>}<AgentChatTimeline timeline={timeline} liveness={liveness} provider={thread.provider ?? "codex"} loading={detailLoading} error={detailError} previews={previews} onPreview={handlePreview} onReveal={handleReveal} /></section>}
     </div>
-    {tab === "chat" && thread.provider !== "pi" && <ThreadComposer thread={thread} cwd={folder.path} onSent={handleComposerSent} onCancelled={handleComposerCancelled} cancelRequest={cancelRequest} running={Boolean(live && timeline?.status === "running" && !timeline.externalRuntime)} onRepin={handleComposerRepin} />}
+    {tab === "chat" && thread.piKind !== "run" && thread.provider !== "pi" && <ThreadComposer thread={thread} cwd={folder.path} onSent={handleComposerSent} onCancelled={handleComposerCancelled} cancelRequest={cancelRequest} running={Boolean(live && timeline?.status === "running" && !timeline.externalRuntime)} onRepin={handleComposerRepin} />}
   </aside>;
 }
 

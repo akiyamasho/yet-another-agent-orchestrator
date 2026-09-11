@@ -100,11 +100,46 @@ export interface PiRawTicket {
   createdAt?: string;
   updatedAt?: string;
   acceptanceCriteria?: { text: string; completed: boolean; line?: number }[];
+  parent?: string | null;
+  parentId?: string | null;
+  assignee?: string | null;
+  blockedBy?: string[];
+  duplicateId?: boolean;
+  issue?: string;
+  progress?: { completed: number; total: number };
 }
+
+export type PiRunPhase = "planning" | "worker" | "reviewer";
+export type PiRunStatus = "queued" | "running" | "reviewing" | "retrying" | "completed" | "failed" | "blocked" | "interrupted" | "stale";
+export interface PiRawRun {
+  runId: string;
+  ticketId?: string;
+  parentTicketId?: string;
+  cwd?: string;
+  projectRoot?: string;
+  workspace?: string;
+  branch?: string;
+  phase: PiRunPhase | string;
+  status: PiRunStatus | string;
+  model?: string;
+  startedAt?: string | number;
+  finishedAt?: string | number;
+  summary?: string;
+  error?: string;
+  objective?: string;
+  ticketPath?: string;
+  sessionDir?: string;
+}
+export interface PiRunEvent { id?: string; runId: string; event?: string; timestamp?: string | number; phase?: string; status?: string; output?: string; summary?: string; error?: string; [key: string]: unknown; }
+export interface PiSchedulerProject { root: string; enabled?: boolean; running?: number; updatedAt?: string; }
+export interface PiSchedulerState { enabled: boolean; running: number; projects?: PiSchedulerProject[]; }
 
 export interface PiSnapshot {
   provider: "pi";
   tickets: PiRawTicket[];
+  runs?: PiRawRun[];
+  runEvents?: PiRunEvent[];
+  scheduler?: PiSchedulerState;
   projects?: string[];
 }
 

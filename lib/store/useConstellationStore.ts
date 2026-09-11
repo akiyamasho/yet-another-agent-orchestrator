@@ -6,6 +6,7 @@ import { mockState } from "@/lib/data/mockData";
 import { normalizeProviders, splitProviderThreadId } from "@/lib/providers";
 import { extractThreads } from "@/lib/codex/mapper";
 import type { AgentEvent, AgentProvider, AgentThread, CreateFolderInput, CreateThreadInput, FolderContext, NormalizedState, ThreadStatus, ViewMode } from "@/lib/types";
+import type { PiSchedulerState } from "@/lib/providers/types";
 
 export type ConnectionStatus = "loading" | "connected" | "offline" | "demo";
 export type ProviderConnections = Record<AgentProvider, ConnectionStatus>;
@@ -18,6 +19,7 @@ type Store = NormalizedState & {
   statusFilter?: ThreadStatus;
   connectionStatus: ConnectionStatus;
   providerConnections: ProviderConnections;
+  piScheduler: Record<string, PiSchedulerState>;
   connectionError?: string;
   lastSyncedAt?: string;
   selectFolder: (id?: string) => void;
@@ -37,6 +39,12 @@ type Store = NormalizedState & {
   deleteThread: (id: string) => Promise<void>;
   addEvent: (event: AgentEvent) => void;
   filteredThreads: () => AgentThread[];
+  planObjective: (root: string, objective: string) => Promise<{ runId?: string }>;
+  startQueue: (root: string) => Promise<void>;
+  stopQueue: (root: string) => Promise<void>;
+  dispatchNext: (root: string) => Promise<{ dispatched?: boolean; reason?: string; runId?: string }>;
+  retryPiRun: (runId: string) => Promise<void>;
+  interruptPiRun: (runId: string) => Promise<void>;
 };
 
 const emptyState: NormalizedState = { folders: {}, threads: {}, events: {} };
@@ -80,6 +88,7 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
   query: "",
   connectionStatus: "loading",
   providerConnections: { codex: "loading", claude: "loading", pi: "loading" },
+  piScheduler: {},
   selectFolder: (selectedFolderId) => set({ selectedFolderId, selectedThreadId: undefined }),
   selectThread: (selectedThreadId) => set({ selectedThreadId }),
   setViewMode: (viewMode) => set({ viewMode }),
@@ -103,8 +112,10 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
         if (codexResult.status === "rejected" && claudeResult.status === "rejected" && piResult.status === "rejected") throw new Error(`Codex: ${String(codexResult.reason)} · Claude: ${String(claudeResult.reason)} · Pi: ${String(piResult.reason)}`);
         const codexSnapshot = codexResult.status === "fulfilled" ? { ...codexResult.value, threads: extractThreads(codexResult.value.threads) } : undefined;
         const normalized = normalizeProviders({ codex: codexSnapshot, claude: claudeResult.status === "fulfilled" ? claudeResult.value : undefined, pi: piResult.status === "fulfilled" ? piResult.value : undefined });
+        const piSnapshot = piResult.status === "fulfilled" ? piResult.value : undefined;
         set((state) => ({
           ...normalized,
+          piScheduler: piSnapshot?.scheduler?.projects ? Object.fromEntries(piSnapshot.scheduler.projects.map((project) => [project.root, { enabled: Boolean(project.enabled), running: project.running ?? 0, updatedAt: project.updatedAt }])) : {},
           connectionStatus: Object.values(providerConnections).every((status) => status === "offline") ? "offline" : "connected",
           providerConnections,
           connectionError: undefined,
@@ -138,7 +149,8 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
     const provider = input.parentId ? get().threads[input.parentId]?.provider ?? input.provider ?? "codex" : input.provider ?? "codex";
     if (desktop) {
       if (provider === "pi") {
-        const created = await desktop.pi.createTicket({ cwd: folder.path, title: input.title, objective: input.objective, acceptanceCriteria: input.acceptanceCriteria });
+        const parentTicketId = input.parentId ? get().threads[input.parentId]?.key : undefined;
+        const created = await desktop.pi.createTicket({ cwd: folder.path, title: input.title, objective: input.objective, acceptanceCriteria: input.acceptanceCriteria, parentId: parentTicketId });
         await get().syncFromSource();
         const filePath = created && typeof created === "object" && "filePath" in created ? String((created as { filePath: string }).filePath) : "";
         return get().threads[`pi:${filePath}`];
@@ -222,6 +234,12 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
     });
   },
   addEvent: (event) => set((state) => ({ events: { ...state.events, [event.id]: event } })),
+  planObjective: async (root, objective) => { const desktop = window.constellationDesktop; if (!desktop) throw new Error("Pi planning is available in the desktop app."); const result = await desktop.pi.plan({ root, objective }); await get().syncFromSource(); return result && typeof result === "object" ? result : {}; },
+  startQueue: async (root) => { const desktop = window.constellationDesktop; if (!desktop) throw new Error("Pi queue controls are available in the desktop app."); await desktop.pi.startQueue(root); await get().syncFromSource(); },
+  stopQueue: async (root) => { const desktop = window.constellationDesktop; if (!desktop) throw new Error("Pi queue controls are available in the desktop app."); await desktop.pi.stopQueue(root); await get().syncFromSource(); },
+  dispatchNext: async (root) => { const desktop = window.constellationDesktop; if (!desktop) throw new Error("Pi dispatch is available in the desktop app."); const result = await desktop.pi.dispatchNext(root); await get().syncFromSource(); return result && typeof result === "object" ? result as { dispatched?: boolean; reason?: string; runId?: string } : {}; },
+  retryPiRun: async (runId) => { const desktop = window.constellationDesktop; if (!desktop) throw new Error("Pi run controls are available in the desktop app."); await desktop.pi.retry(runId); await get().syncFromSource(); },
+  interruptPiRun: async (runId) => { const desktop = window.constellationDesktop; if (!desktop) throw new Error("Pi run controls are available in the desktop app."); await desktop.pi.interrupt(runId); await get().syncFromSource(); },
   filteredThreads: () => {
     const { threads, query, selectedFolderId, statusFilter } = get();
     const needle = query.trim().toLowerCase();

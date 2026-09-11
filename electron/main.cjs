@@ -26,7 +26,7 @@ const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 function ensurePi() {
   if (!piProvider) piProvider = new PiMarkdownProvider({ roots: readProjects() });
-  piProvider.roots = readProjects();
+  else piProvider.updateRoots(readProjects());
   return piProvider;
 }
 
@@ -73,7 +73,16 @@ function writePreferences(patch) {
 function readProjects() {
   try {
     const parsed = JSON.parse(fs.readFileSync(projectsFile(), "utf8"));
-    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string" && path.isAbsolute(item)) : [];
+    if (!Array.isArray(parsed)) return [];
+    const projects = [];
+    for (const item of parsed) {
+      if (typeof item !== "string" || !path.isAbsolute(item)) continue;
+      try {
+        const canonical = fs.realpathSync(item);
+        if (fs.statSync(canonical).isDirectory()) projects.push(canonical);
+      } catch {}
+    }
+    return [...new Set(projects)];
   } catch {
     return [];
   }
@@ -432,8 +441,11 @@ function registerIpc() {
   });
   ipcMain.handle("projects:add", (_event, projectPath) => {
     if (typeof projectPath !== "string" || !path.isAbsolute(projectPath)) throw new Error("Project path must be absolute.");
-    writeProjects([...readProjects(), path.normalize(projectPath)]);
-    rememberProjectRoot(projectPath);
+    let canonical;
+    try { canonical = fs.realpathSync(projectPath); } catch { throw new Error("Project path must be an existing directory."); }
+    if (!fs.statSync(canonical).isDirectory()) throw new Error("Project path must be a directory.");
+    writeProjects([...readProjects(), canonical]);
+    rememberProjectRoot(canonical);
     return readProjects();
   });
   ipcMain.handle("projects:list", () => readProjects());
@@ -533,10 +545,17 @@ function registerIpc() {
   ipcMain.handle("claude:snapshot", () => claudeSnapshot());
   ipcMain.handle("pi:snapshot", () => ensurePi().snapshot());
   ipcMain.handle("pi:read-ticket", (_event, filePath) => ensurePi().readTicket(String(filePath)));
+   ipcMain.handle("pi:read-run", (_event, runId) => ensurePi().readRun(String(runId)));
   ipcMain.handle("pi:create-ticket", (_event, input) => ensurePi().createTicket(input));
   ipcMain.handle("pi:update-ticket", (_event, input) => ensurePi().updateTicket(input));
   ipcMain.handle("pi:dispatch", (_event, filePath) => ensurePi().dispatch(String(filePath)));
   ipcMain.handle("pi:interrupt", (_event, filePath) => ensurePi().interrupt(String(filePath)));
+  ipcMain.handle("pi:plan", (_event, input = {}) => ensurePi().planObjective(String(input.root), String(input.objective || '')));
+  ipcMain.handle("pi:queue-start", (_event, root) => ensurePi().startQueue(String(root)));
+  ipcMain.handle("pi:queue-stop", (_event, root) => ensurePi().stopQueue(String(root)));
+  ipcMain.handle("pi:queue-status", (_event, root) => ensurePi().schedulerStatus(String(root)));
+  ipcMain.handle("pi:dispatch-next", (_event, root) => ensurePi().dispatchNext(String(root)));
+  ipcMain.handle("pi:retry", (_event, filePath) => ensurePi().retry(String(filePath)));
   ipcMain.handle("claude:read-session", async (_event, sessionId) => normalizeClaudeTimeline(await ensureClaude().readSession(String(sessionId))));
   ipcMain.handle("claude:continue-session", (_event, input) => startClaude({ ...input, objective: input.message }, true));
   ipcMain.handle("claude:interrupt-session", (_event, sessionId) => ensureClaude().interruptSession(String(sessionId)));
@@ -610,5 +629,5 @@ app.whenReady().then(() => {
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.on("before-quit", () => codexBridge?.close());
+app.on("before-quit", () => { piProvider?.close(); codexBridge?.close(); });
 app.on("window-all-closed", () => { if (!isMac) app.quit(); });

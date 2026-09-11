@@ -580,6 +580,27 @@
     .commandBar { height: auto; }
 }
 
+.orchestrationControls {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(7, 10, 17, .48);
+    white-space: nowrap;
+}
+.orchestrationControls .searchTrigger { min-height: 30px; border: 0; }
+.queueStatus { padding: 0 6px; color: var(--quiet); font: 9px var(--font-mono); white-space: nowrap; }
+.actionMessage { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 18px 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.actionMessage button { color: inherit; background: transparent; border: 0; text-decoration: underline; cursor: pointer; }
+.actionError { color: #f0c4b5; border-color: rgba(217, 119, 87, .52); background: rgba(42, 27, 27, .94); }
+.actionStatus { color: #b9d8ca; border-color: rgba(143, 174, 143, .42); background: rgba(22, 40, 34, .94); }
+@media (max-width: 1500px) { .queueStatus { display: none; } }
+@media (max-width: 900px) { .orchestrationControls .searchTrigger { width: 32px; justify-content: center; padding: 6px; } }
+@media (max-width: 680px) { .orchestrationControls { margin-left: auto; } }
+@media (prefers-reduced-motion: reduce) { .orchestrationControls *, .actionMessage * { transition: none !important; } }
+
 /* Layered system chrome: structural materials stay quiet while controls lift
    into lighter, rounded interactive surfaces. */
 .shell {

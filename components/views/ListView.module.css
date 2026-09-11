@@ -351,3 +351,16 @@
 .primary:disabled:active { opacity: .48; cursor: not-allowed; background: var(--material-2, transparent); border-color: var(--line); color: var(--muted, #8994b1); transform: none; }
 .filterActive:hover,
 .filterActive:focus-visible { background: color-mix(in srgb, var(--projector) 86%, white); }
+.groupProgress {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    color: var(--quiet, #8994b1);
+    font: 9px var(--font-mono);
+    font-weight: 500;
+    white-space: nowrap;
+}
+.groupProgress progress { width: 92px; height: 5px; accent-color: #c49a6c; }
+@media (max-width: 900px) { .groupProgress { display: none; } }
+@media (prefers-reduced-motion: reduce) { .groupProgress progress { transition: none; } }

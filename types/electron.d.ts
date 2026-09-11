@@ -77,10 +77,17 @@ declare global {
       pi: {
         getSnapshot: () => Promise<PiSnapshot & { connected: boolean }>;
         readTicket: (filePath: string) => Promise<unknown>;
-        createTicket: (input: { cwd: string; title: string; objective?: string; acceptanceCriteria?: string[] }) => Promise<unknown>;
+        readRun: (runId: string) => Promise<unknown>;
+        createTicket: (input: { cwd: string; title: string; objective?: string; acceptanceCriteria?: string[]; parentId?: string; blockedBy?: string[] }) => Promise<unknown>;
         updateTicket: (input: { filePath: string; title?: string; objective?: string; acceptanceCriteria?: string[] }) => Promise<unknown>;
         dispatch: (filePath: string) => Promise<unknown>;
         interrupt: (filePath: string) => Promise<unknown>;
+        plan: (input: { root: string; objective: string }) => Promise<unknown>;
+        startQueue: (root: string) => Promise<unknown>;
+        stopQueue: (root: string) => Promise<unknown>;
+        queueStatus: (root: string) => Promise<unknown>;
+        dispatchNext: (root: string) => Promise<unknown>;
+        retry: (filePath: string) => Promise<unknown>;
       };
       claude: {
         getSnapshot: () => Promise<Omit<ClaudeSnapshot, "provider"> & { connected: boolean; capabilities?: Record<string, boolean> }>;

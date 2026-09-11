@@ -742,6 +742,16 @@
 .folderNode:hover, .threadNode:hover { transform: translateY(-2px) scale(1.01); }
 .folderNode:active, .threadNode:active { transform: translateY(0) scale(.985); }
 .folderNode .folderGlyph, .threadNode .statusRing { background-color: var(--material-2, rgba(4, 7, 10, .92)); }
+.folderProgress {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #aebbd0;
+    font: 9px var(--font-mono);
+}
+.folderProgress progress { width: 72px; height: 4px; accent-color: var(--accent); }
+.queueStatus { color: #7f8ca8; font: 9px var(--font-mono); }
+@media (prefers-reduced-motion: reduce) { .folderNode, .threadNode { transition: none !important; } }
 .threadCopy { background: linear-gradient(90deg, color-mix(in srgb, var(--material-2, #0a0f13) 90%, transparent), transparent); }
 .statePill, .legend { font-family: var(--font-mono, var(--font-mono)); }
 @media (prefers-reduced-motion: reduce) { .folderNode, .threadNode, .canvas :global(.react-flow__controls-button) { transition: none; } .folderNode:hover, .threadNode:hover, .folderNode:active, .threadNode:active { transform: none; } }

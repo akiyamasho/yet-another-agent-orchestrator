@@ -6,12 +6,12 @@ import { useConstellationStore } from "@/lib/store/useConstellationStore";
 import type { AgentProvider, PermissionMode } from "@/lib/types";
 import styles from "./AgentDialogs.module.css";
 
-export type AgentDialogMode = "folder" | "agent" | "subagent" | "edit" | "archive" | "delete";
-export interface AgentDialogsProps { mode?: AgentDialogMode; open?: boolean; onClose?: () => void; folderId?: string; threadId?: string; onSaved?: (id: string) => void; }
+export type AgentDialogMode = "folder" | "agent" | "subagent" | "plan" | "edit" | "archive" | "delete";
+export interface AgentDialogsProps { mode?: AgentDialogMode; open?: boolean; onClose?: () => void; folderId?: string; threadId?: string; onSaved?: (id: string) => void; onPlannerStarted?: (message: string) => void; }
 const permissions: PermissionMode[] = ["read-only", "workspace-write", "full-access"];
 const defaults = { name: "", path: "", accent: "#e2b84b", title: "", objective: "", profile: "builder", model: "default", effort: "medium", permission: "workspace-write", branch: "", provider: "codex" };
 
-export function AgentDialogs({ mode, open = Boolean(mode), onClose, folderId, threadId, onSaved }: AgentDialogsProps) {
+export function AgentDialogs({ mode, open = Boolean(mode), onClose, folderId, threadId, onSaved, onPlannerStarted }: AgentDialogsProps) {
   const folders = useConstellationStore((s) => s.folders);
   const threads = useConstellationStore((s) => s.threads);
   const createFolder = useConstellationStore((s) => s.createFolder);
@@ -19,6 +19,7 @@ export function AgentDialogs({ mode, open = Boolean(mode), onClose, folderId, th
   const updateThread = useConstellationStore((s) => s.updateThread);
   const archiveThread = useConstellationStore((s) => s.archiveThread);
   const deleteThread = useConstellationStore((s) => s.deleteThread);
+  const planObjective = useConstellationStore((s) => s.planObjective);
   const thread = threadId ? threads[threadId] : undefined;
   const [values, setValues] = useState<Record<string, string>>(defaults);
   const [error, setError] = useState("");
@@ -27,8 +28,8 @@ export function AgentDialogs({ mode, open = Boolean(mode), onClose, folderId, th
 
   useEffect(() => {
     if (thread && (mode === "edit" || mode === "subagent")) setValues({ ...defaults, title: mode === "edit" ? thread.title : "", objective: mode === "edit" ? thread.objective : "", profile: thread.profile, model: thread.model === "Codex" || thread.model === "Claude Code" || thread.model === "Pi tickets" ? "default" : thread.model, effort: thread.reasoningEffort, permission: thread.permission, branch: thread.branch ?? "", provider: thread.provider ?? "codex" });
-    else if (mode === "agent") setValues({ ...defaults });
-  }, [thread, mode]);
+    else if (mode === "agent" || mode === "plan") { setValues({ ...defaults }); setError(""); setConfirmation(""); }
+  }, [thread, mode, open, folderId]);
   const folder = folderId ? folders[folderId] : thread ? folders[thread.folderId] : undefined;
   const provider = (thread?.provider ?? values.provider ?? "codex") as AgentProvider;
   const descendantIds = useMemo(() => {
@@ -70,6 +71,7 @@ export function AgentDialogs({ mode, open = Boolean(mode), onClose, folderId, th
         const result = await createFolder({ name: values.name.trim(), path: values.path.trim(), accent: values.accent, defaultPermission: values.permission as PermissionMode });
         close(); onSaved?.(result.id); return;
       }
+      if (mode === "plan") { if (!folder || !values.objective.trim()) return setError("Describe the objective to plan."); const result = await planObjective(folder.path, values.objective.trim()); onPlannerStarted?.(result?.runId ? `Planner run started: ${result.runId}` : "Planner run started."); close(); return; }
       if (!values.title.trim() || (!values.objective.trim() && mode !== "edit" && mode !== "agent")) return setError(mode === "agent" ? "A title is required." : "Title and objective are required.");
       const result = mode === "edit" && thread
         ? await updateThread(thread.id, { title: values.title.trim(), profile: values.profile, model: values.model, reasoningEffort: values.effort, permission: values.permission as PermissionMode, branch: values.branch || undefined })
@@ -80,7 +82,7 @@ export function AgentDialogs({ mode, open = Boolean(mode), onClose, folderId, th
   };
 
   const destructive = mode === "archive" || mode === "delete";
-  const heading = mode === "folder" ? "Add folder" : mode === "agent" ? "Create main agent" : mode === "subagent" ? "Add subagent" : mode === "edit" ? "Edit task" : mode === "delete" ? "Delete permanently" : "Archive task";
+  const heading = mode === "folder" ? "Add folder" : mode === "agent" ? "Create main agent" : mode === "subagent" ? "Add subagent" : mode === "plan" ? "Plan objective" : mode === "edit" ? "Edit task" : mode === "delete" ? "Delete permanently" : "Archive task";
   const warning = provider === "pi"
     ? mode === "delete" ? "Pi tickets are markdown files in the project workspace. Delete or archive them from the project so normal file history/tools can track the change." : "Pi markdown tickets do not support archive yet."
     : provider === "claude"
@@ -90,13 +92,14 @@ export function AgentDialogs({ mode, open = Boolean(mode), onClose, folderId, th
   return <div className={styles.backdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><section className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="dialog-title">
     <button className={styles.close} onClick={close} aria-label="Close dialog"><X size={17}/></button>
     <p className={styles.eyebrow}>{folder ? `${folder.name} · ${folder.path}` : "Workspace"}</p><h2 id="dialog-title">{heading}</h2>
-    {mode === "agent" && <p className={styles.agentHint}>This agent will open in the selected folder. Send the first instruction from Chat.</p>}
+    {mode === "agent" && <p className={styles.agentHint}>This agent will open in the selected folder. Send the first instruction from Chat.</p>}{mode === "plan" && <p className={styles.agentHint}>Sol planner will create Markdown tickets only. It will not implement code.</p>}
     {thread && mode !== "folder" && <div className={styles.providerBanner}><ProviderOption active provider={provider} locked /><span>{mode === "delete" ? "Delete permanently" : mode === "archive" ? "Archive" : "Manage"} this provider task</span></div>}
     {destructive ? <><p className={styles.warning}>{warning}</p><label className={styles.check}><input type="checkbox" defaultChecked disabled /> Include {descendantIds.length} mapped child context{descendantIds.length === 1 ? "" : "s"} {mode === "delete" ? "(required for this deletion)" : "(archive as a tree)"}</label>{mode === "delete" && <label className={styles.confirmation}>Type <strong>DELETE</strong> to confirm<input value={confirmation} onChange={(event) => { setConfirmation(event.target.value); setError(""); }} placeholder="DELETE" autoComplete="off" spellCheck={false} /></label>}</> : <form onSubmit={submit}><div className={styles.fields}>
       {mode === "folder" ? <><Field label="Folder name" value={values.name} onChange={(v) => set("name", v)} placeholder="e.g. marketing-site"/><div className={styles.pathPicker}><Field label="Local path" value={values.path} onChange={(v) => set("path", v)} placeholder="/Users/me/Projects/marketing-site"/>{window.constellationDesktop && <button type="button" onClick={chooseFolder}><FolderOpen size={15}/>Browse</button>}</div><Field label="Accent" value={values.accent} onChange={(v) => set("accent", v)} type="color"/><Select label="Default permission" value={values.permission} onChange={(v) => set("permission", v)} options={permissions}/></>
+        : mode === "plan" ? <label>Objective<textarea value={values.objective} onChange={(e) => set("objective", e.target.value)} placeholder="What should Sol break into tickets?" rows={5}/></label>
         : mode === "agent" ? <><Field label="Agent / ticket title" value={values.title} onChange={(v) => set("title", v)} placeholder="A concise task name"/><div className={styles.providerChoices} aria-label="Provider"><span>Provider</span>{(["codex", "claude", "pi"] as AgentProvider[]).map((item) => <ProviderOption key={item} provider={item} active={values.provider === item} onClick={() => set("provider", item)} />)}</div></>
         : <><Field label={mode === "subagent" ? "Bounded task" : "Task title"} value={values.title} onChange={(v) => set("title", v)} placeholder="A concise task name"/><label>{mode === "edit" && window.constellationDesktop ? "Original objective · read only" : "Objective"}<textarea value={values.objective} onChange={(e) => set("objective", e.target.value)} placeholder="What should this agent deliver?" rows={3} disabled={mode === "edit" && Boolean(window.constellationDesktop)}/></label><div className={styles.grid}><Field label="Profile" value={values.profile} onChange={(v) => set("profile", v)}/><Field label="Model" value={values.model} onChange={(v) => set("model", v)}/><Select label="Reasoning" value={values.effort} onChange={(v) => set("effort", v)} options={provider === "claude" ? ["default", "low", "medium", "high", "max"] : ["default", "low", "medium", "high", "xhigh", "ultra"]}/><Select label="Permission" value={values.permission} onChange={(v) => set("permission", v)} options={permissions}/></div><Field label="Branch / worktree (optional)" value={values.branch} onChange={(v) => set("branch", v)} placeholder="agent/task-name"/></>}
-    </div>{error && <p className={styles.error} role="alert">{error}</p>}<div className={styles.footer}><button type="button" onClick={close} disabled={busy}>Cancel</button><button className={styles.submit} type="submit" disabled={busy || (mode === "agent" && !folder)}>{busy ? "Working…" : mode === "edit" ? "Save changes" : mode === "folder" ? "Add folder" : mode === "subagent" ? "Delegate" : "Create agent"}</button></div></form>}
+    </div>{error && <p className={styles.error} role="alert">{error}</p>}<div className={styles.footer}><button type="button" onClick={close} disabled={busy}>Cancel</button><button className={styles.submit} type="submit" disabled={busy || (mode === "agent" && !folder)}>{busy ? "Working…" : mode === "plan" ? "Create Markdown tickets" : mode === "edit" ? "Save changes" : mode === "folder" ? "Add folder" : mode === "subagent" ? "Delegate" : "Create agent"}</button></div></form>}
     {destructive && <div className={styles.footer}>{error && <p className={styles.error} role="alert">{error}</p>}<button onClick={close} disabled={busy}>Cancel</button><button className={styles.submitDanger} onClick={submit} disabled={busy || (mode === "delete" && confirmation !== "DELETE")}>{busy ? "Working…" : mode === "delete" ? "Delete permanently" : "Archive task"}</button></div>}
   </section></div>;
 }

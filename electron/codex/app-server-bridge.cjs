@@ -50,7 +50,7 @@ class CodexAppServerBridge extends EventEmitter {
     this._connectOptions = { clientInfo, capabilities };
     this._spawn();
     const result = await this.request('initialize', {
-      clientInfo: clientInfo || { name: 'constellation', title: 'Constellation', version: '0.4.1' },
+      clientInfo: clientInfo || { name: 'constellation', title: 'Constellation', version: '0.6.0' },
       capabilities: capabilities || { experimentalApi: true, requestAttestation: false },
     });
     this._send({ jsonrpc: '2.0', method: 'initialized', params: {} });

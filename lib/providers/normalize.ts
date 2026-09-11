@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentProvider, AgentThread, FolderContext, NormalizedState, PermissionMode, ThreadStatus } from "@/lib/types";
-import type { ClaudeRawSession, ClaudeSnapshot, CodexRawThread, CodexSnapshot, PiRawTicket, PiSnapshot, ProviderEventRecord, ProviderMeta, ProviderSnapshot } from "./types";
+import type { ClaudeRawSession, ClaudeSnapshot, CodexRawThread, CodexSnapshot, PiRawRun, PiRawTicket, PiSnapshot, ProviderEventRecord, ProviderMeta, ProviderSnapshot } from "./types";
 
 const COLORS = { codex: "#7aa7b8", claude: "#d97757", pi: "#c49a6c" } as const;
 const FOLDER_COLORS = ["#e2b84b", "#7aa7b8", "#c9875c", "#a78fbb", "#8fae8f", "#d4a86a"] as const;
@@ -8,7 +8,7 @@ const EMPTY: NormalizedState = { folders: {}, threads: {}, events: {} };
 export function providerMeta(provider: AgentProvider): ProviderMeta {
   if (provider === "codex") return { provider, label: "OpenAI Codex", shortLabel: "CODEX", color: COLORS.codex, icon: "codex" };
   if (provider === "claude") return { provider, label: "Claude Code", shortLabel: "CLAUDE", color: COLORS.claude, icon: "claude" };
-  return { provider, label: "Pi tickets", shortLabel: "PI", color: COLORS.pi, icon: "pi" };
+  return { provider, label: "Pi orchestration", shortLabel: "PI", color: COLORS.pi, icon: "pi" };
 }
 
 function text(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
@@ -28,6 +28,10 @@ function hash(value: string) {
 }
 function folderId(cwd: string) { return `folder-${hash(cwd)}`; }
 function folderColor(cwd: string) { return FOLDER_COLORS[parseInt(hash(cwd), 36) % FOLDER_COLORS.length]; }
+function piPhaseLabel(phase: unknown) {
+  const value = text(phase).toLowerCase();
+  return value === "planning" || value === "planner" ? "PLANNER" : value === "reviewer" ? "REVIEWER" : "WORKER";
+}
 export function providerThreadId(provider: AgentProvider, rawId: string) { return `${provider}:${rawId}`; }
 export function splitProviderThreadId(id: string): { provider: AgentProvider; rawId: string } {
   const separator = id.indexOf(":");
@@ -37,14 +41,13 @@ export function splitProviderThreadId(id: string): { provider: AgentProvider; ra
 }
 function cwdOf(record: CodexRawThread | ClaudeRawSession | PiRawTicket) { return text(record.cwd) || text((record as ClaudeRawSession).projectPath) || text((record as ClaudeRawSession).project_path) || text((record as ClaudeRawSession).directory) || ""; }
 function statusOf(value: unknown, archived = false): ThreadStatus {
-  const status = typeof value === "string" ? value.toLowerCase() : value && typeof value === "object" ? text((value as Record<string, unknown>).type || (value as Record<string, unknown>).status || (value as Record<string, unknown>).state).toLowerCase() : "";
-  if (archived || status.includes("archiv")) return "completed";
-  if (status.includes("error") || status.includes("fail")) return "failed";
-  if (status.includes("approval") || status.includes("input") || status.includes("attention")) return "needs_attention";
-  if (status.includes("run") || status.includes("active") || status.includes("progress") || status === "in-progress" || status === "in_progress") return "running";
-  if (status.includes("approval") || status.includes("input") || status.includes("attention") || status.includes("block")) return "needs_attention";
+  const status = typeof value === "string" ? value.toLowerCase().trim() : value && typeof value === "object" ? text((value as Record<string, unknown>).type || (value as Record<string, unknown>).status || (value as Record<string, unknown>).state).toLowerCase().trim() : "";
+  if (status === "failed" || status.includes("error") || status.includes("fail")) return "failed";
+  if (status === "done" || status === "completed" || status.includes("complete") || status.includes("success") || archived || status.includes("archiv")) return "completed";
+  if (status === "review" || status === "manual_review" || status === "interrupted") return "waiting";
+  if (status === "stale" || status === "blocked" || status.includes("attention") || status.includes("approval") || status.includes("input") || status.includes("block")) return "needs_attention";
+  if (status === "reviewing" || status === "retrying" || status === "running" || status.includes("run") || status.includes("active") || status.includes("progress")) return "running";
   if (status.includes("wait") || status.includes("pause")) return "waiting";
-  if (status.includes("complete") || status.includes("done") || status.includes("success")) return "completed";
   if (status === "todo" || status === "to-do" || status === "backlog" || status === "queued") return "idle";
   return (["idle", "waiting", "running", "needs_attention", "completed", "failed"] as ThreadStatus[]).includes(status as ThreadStatus) ? status as ThreadStatus : "idle";
 }
@@ -134,7 +137,43 @@ function mapSnapshot(snapshot: ProviderSnapshot): NormalizedState {
 
 export function normalizeCodex(snapshot: Omit<CodexSnapshot, "provider"> | CodexSnapshot) { return mapSnapshot({ ...snapshot, provider: "codex" }); }
 export function normalizeClaude(snapshot: Omit<ClaudeSnapshot, "provider"> | ClaudeSnapshot) { return mapSnapshot({ ...snapshot, provider: "claude" }); }
-export function normalizePi(snapshot: Omit<PiSnapshot, "provider"> | PiSnapshot) { return mapSnapshot({ ...snapshot, provider: "pi" }); }
+export function normalizePi(snapshot: Omit<PiSnapshot, "provider"> | PiSnapshot): NormalizedState {
+  const input = { ...snapshot, provider: "pi" as const };
+  const state: NormalizedState = { folders: {}, threads: {}, events: {} };
+  const tickets = input.tickets || [];
+  const ticketsByProjectId = new Map<string, PiRawTicket[]>();
+  tickets.forEach((ticket) => {
+    const key = `${ticket.cwd}\u0000${ticket.id.toLowerCase()}`;
+    ticketsByProjectId.set(key, [...(ticketsByProjectId.get(key) || []), ticket]);
+  });
+  const addFolder = (cwd: string) => {
+    if (!cwd || state.folders[folderId(cwd)]) return;
+    state.folders[folderId(cwd)] = { id: folderId(cwd), name: cwd.split(/[\\/]/).filter(Boolean).pop() || cwd, path: cwd, accent: folderColor(cwd), defaultPermission: "workspace-write" };
+  };
+  tickets.forEach((ticket) => {
+    const cwd = text(ticket.cwd); const canonical = text(ticket.filePath); if (!cwd || !canonical) return;
+    addFolder(cwd);
+    const parent = text(ticket.parentId) || text(ticket.parent);
+    const parentMatches = parent ? ticketsByProjectId.get(`${cwd}\u0000${parent.toLowerCase()}`) : undefined;
+    const parentTicket = parentMatches?.length === 1 ? parentMatches[0] : undefined;
+    const id = `pi:${canonical}`; const completed = ticket.progress?.completed ?? ticket.acceptanceCriteria?.filter((item) => item.completed).length ?? 0; const total = ticket.progress?.total ?? ticket.acceptanceCriteria?.length ?? 0;
+    const status = ticket.issue || ticket.duplicateId ? "needs_attention" : statusOf(ticket.status || ticket.state);
+    state.threads[id] = { id, key: text(ticket.id) || canonical.split(/[\\/]/).pop()?.replace(/\.md$/, "") || "TICKET", folderId: folderId(cwd), parentId: parentTicket ? `pi:${parentTicket.filePath}` : undefined, title: text(ticket.title) || text(ticket.id), objective: text(ticket.objective) || text(ticket.title), summary: text(ticket.summary) || ticket.issue || `${status.replace("_", " ")} · Pi ticket`, profile: "markdown-ticket", status, model: "Pi", reasoningEffort: "default", permission: "workspace-write", startedAt: date(ticket.createdAt), updatedAt: date(ticket.updatedAt), provider: "pi", piKind: "ticket", ticketState: text(ticket.state || ticket.status), projectRoot: cwd, progress: { completed, total }, acceptanceCriteria: ticket.acceptanceCriteria, assignee: text(ticket.assignee) || undefined, blockedBy: ticket.blockedBy, attention: status === "needs_attention" ? { kind: "input", message: ticket.issue || "This Pi ticket needs attention." } : undefined, issue: ticket.issue, duplicateId: ticket.duplicateId, missingBlocker: ticket.issue?.match(/Missing blocker ticket:\s*(.+)$/i)?.[1], ticketPath: canonical };
+  });
+  const ticketByProjectId = new Map(tickets.map((ticket) => [`${ticket.cwd}\u0000${ticket.id.toLowerCase()}`, `pi:${ticket.filePath}`]));
+  const ticketByPath = new Map(tickets.map((ticket) => [ticket.filePath, `pi:${ticket.filePath}`]));
+  (input.runs || []).forEach((run: PiRawRun) => {
+    const linkedTicket = run.ticketPath ? ticketByPath.get(text(run.ticketPath)) : undefined;
+    const root = text(run.projectRoot) || text(run.cwd) || (linkedTicket ? tickets.find((ticket) => `pi:${ticket.filePath}` === linkedTicket)?.cwd : "") || (run.ticketId ? tickets.filter((ticket) => ticket.id.toLowerCase() === run.ticketId!.toLowerCase()).at(0)?.cwd : ""); if (!root) return; addFolder(root);
+    const sameProjectMatches = tickets.filter((ticket) => ticket.cwd === root && ticket.id.toLowerCase() === String(run.ticketId || "").toLowerCase());
+    const parent = linkedTicket || (sameProjectMatches.length === 1 ? ticketByProjectId.get(`${root}\u0000${run.ticketId!.toLowerCase()}`) : undefined); const status = statusOf(run.status);
+    const id = `pi:run:${run.runId}`;
+    const phaseLabel = piPhaseLabel(run.phase);
+    state.threads[id] = { id, key: run.runId, folderId: folderId(root), parentId: parent, title: `${phaseLabel} · ${run.ticketId || "Objective"}`, objective: text(run.objective) || "Pi orchestration run", summary: text(run.summary) || text(run.error) || `${phaseLabel.toLowerCase()} run`, profile: `pi-${String(run.phase || "run")}`, status, model: text(run.model) || "Pi", reasoningEffort: "default", permission: "workspace-write", branch: text(run.branch) || undefined, startedAt: date(run.startedAt), updatedAt: date(run.finishedAt) || date(run.startedAt), finishedAt: date(run.finishedAt), provider: "pi", piKind: "run", runId: run.runId, runPhase: String(run.phase || "run"), projectRoot: root, workspace: text(run.workspace) || root, error: text(run.error) || undefined };
+  });
+  (input.runEvents || []).forEach((event, index) => { const threadId = `pi:run:${text(event.runId)}`; if (!state.threads[threadId]) return; const type = text(event.event); state.events[`pi:run-event:${text(event.id) || `${event.runId}-${index}`}`] = { id: `pi:run-event:${text(event.id) || `${event.runId}-${index}`}`, threadId, type: type.includes("error") ? "error" : type.includes("output") ? "message" : "status", title: type || "Pi run update", detail: text(event.output) || text(event.summary) || text(event.error) || undefined, timestamp: date(event.timestamp) || new Date(0).toISOString() }; });
+  return state;
+}
 export function mergeNormalizedStates(...states: NormalizedState[]): NormalizedState {
   return states.reduce((merged, state) => ({ folders: { ...merged.folders, ...state.folders }, threads: { ...merged.threads, ...state.threads }, events: { ...merged.events, ...state.events } }), { ...EMPTY });
 }
