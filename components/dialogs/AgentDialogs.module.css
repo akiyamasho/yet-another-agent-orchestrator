@@ -228,7 +228,7 @@
 .providerBanner { display: flex; align-items: center; gap: 10px; margin: 0 0 15px; }
 .providerLabel { color: var(--muted); font: 9px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
 .providerOptions { display: flex; gap: 7px; }
-.providerOption { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 0 9px; color: var(--muted); border: 1px solid var(--line); background: transparent; cursor: pointer; font: 9px var(--font-mono); letter-spacing: .05em; text-transform: uppercase; }
+.providerChoices { display: grid; gap: 7px; color: var(--quiet); font: 10px var(--font-mono); } .providerChoices > span { text-transform: uppercase; letter-spacing: .08em; } .providerChoices { grid-template-columns: auto 1fr 1fr 1fr; align-items: center; } .providerOption { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 0 9px; color: var(--muted); border: 1px solid var(--line); background: transparent; cursor: pointer; font: 9px var(--font-mono); letter-spacing: .05em; text-transform: uppercase; }
 .providerOption:hover:not(:disabled), .providerActive { color: var(--text); border-color: var(--projector); background: rgba(122, 167, 184, .09); }
 .providerOption:disabled { cursor: default; opacity: .9; }
 .providerOption small { color: var(--quiet); font-size: 7px; }

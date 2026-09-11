@@ -1,7 +1,7 @@
 export {};
 
 import type { CodexBridgeSnapshotResponse } from "@/lib/codex/types";
-import type { ClaudeSnapshot } from "@/lib/providers/types";
+import type { ClaudeSnapshot, PiSnapshot } from "@/lib/providers/types";
 
 type CodexStartInput = {
   cwd: string;
@@ -73,6 +73,14 @@ declare global {
         deleteThread: (threadId: string) => Promise<void>;
         onNotification: (listener: (message: { method: string; params?: Record<string, unknown> }) => void) => () => void;
         onConnection: (listener: (state: { status: "connected" | "offline"; error?: string }) => void) => () => void;
+      };
+      pi: {
+        getSnapshot: () => Promise<PiSnapshot & { connected: boolean }>;
+        readTicket: (filePath: string) => Promise<unknown>;
+        createTicket: (input: { cwd: string; title: string; objective?: string; acceptanceCriteria?: string[] }) => Promise<unknown>;
+        updateTicket: (input: { filePath: string; title?: string; objective?: string; acceptanceCriteria?: string[] }) => Promise<unknown>;
+        dispatch: (filePath: string) => Promise<unknown>;
+        interrupt: (filePath: string) => Promise<unknown>;
       };
       claude: {
         getSnapshot: () => Promise<Omit<ClaudeSnapshot, "provider"> & { connected: boolean; capabilities?: Record<string, boolean> }>;

@@ -33,7 +33,8 @@ const providerMeta: Record<
     { label: string; short: string; color: string }
 > = {
     codex: { label: "Codex", short: "C", color: "#7aa7b8" },
-    claude: { label: "Claude Code", short: "CC", color: "#d97757" }
+    claude: { label: "Claude Code", short: "CC", color: "#d97757" },
+    pi: { label: "Pi tickets", short: "PI", color: "#c49a6c" }
 };
 const statusLabels: Record<ThreadStatus, string> = {
     running: "Running",
@@ -185,7 +186,7 @@ export function NowView({ onLocate, onOpen }: NowViewProps) {
     const renderGroups = (items: Activity[], section: string) =>
         grouped(items).map((project) => {
             const folder = folders[project.folderId];
-            const providers = (["codex", "claude"] as AgentProvider[])
+            const providers = (["codex", "claude", "pi"] as AgentProvider[])
                 .map((provider) => ({
                     provider,
                     items: project.activities.filter(

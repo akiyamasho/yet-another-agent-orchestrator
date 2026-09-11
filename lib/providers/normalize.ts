@@ -1,14 +1,14 @@
 import type { AgentEvent, AgentProvider, AgentThread, FolderContext, NormalizedState, PermissionMode, ThreadStatus } from "@/lib/types";
-import type { ClaudeRawSession, ClaudeSnapshot, CodexRawThread, CodexSnapshot, ProviderEventRecord, ProviderMeta, ProviderSnapshot } from "./types";
+import type { ClaudeRawSession, ClaudeSnapshot, CodexRawThread, CodexSnapshot, PiRawTicket, PiSnapshot, ProviderEventRecord, ProviderMeta, ProviderSnapshot } from "./types";
 
-const COLORS = { codex: "#7aa7b8", claude: "#d97757" } as const;
+const COLORS = { codex: "#7aa7b8", claude: "#d97757", pi: "#c49a6c" } as const;
 const FOLDER_COLORS = ["#e2b84b", "#7aa7b8", "#c9875c", "#a78fbb", "#8fae8f", "#d4a86a"] as const;
 const EMPTY: NormalizedState = { folders: {}, threads: {}, events: {} };
 
 export function providerMeta(provider: AgentProvider): ProviderMeta {
-  return provider === "codex"
-    ? { provider, label: "OpenAI Codex", shortLabel: "CODEX", color: COLORS.codex, icon: "codex" }
-    : { provider, label: "Claude Code", shortLabel: "CLAUDE", color: COLORS.claude, icon: "claude" };
+  if (provider === "codex") return { provider, label: "OpenAI Codex", shortLabel: "CODEX", color: COLORS.codex, icon: "codex" };
+  if (provider === "claude") return { provider, label: "Claude Code", shortLabel: "CLAUDE", color: COLORS.claude, icon: "claude" };
+  return { provider, label: "Pi tickets", shortLabel: "PI", color: COLORS.pi, icon: "pi" };
 }
 
 function text(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
@@ -32,10 +32,10 @@ export function providerThreadId(provider: AgentProvider, rawId: string) { retur
 export function splitProviderThreadId(id: string): { provider: AgentProvider; rawId: string } {
   const separator = id.indexOf(":");
   const provider = id.slice(0, separator) as AgentProvider;
-  if (separator < 1 || (provider !== "codex" && provider !== "claude")) return { provider: "codex", rawId: id };
+  if (separator < 1 || !["codex", "claude", "pi"].includes(provider)) return { provider: "codex", rawId: id };
   return { provider, rawId: id.slice(separator + 1) };
 }
-function cwdOf(record: CodexRawThread | ClaudeRawSession) { return text(record.cwd) || text((record as ClaudeRawSession).projectPath) || text((record as ClaudeRawSession).project_path) || text((record as ClaudeRawSession).directory) || ""; }
+function cwdOf(record: CodexRawThread | ClaudeRawSession | PiRawTicket) { return text(record.cwd) || text((record as ClaudeRawSession).projectPath) || text((record as ClaudeRawSession).project_path) || text((record as ClaudeRawSession).directory) || ""; }
 function statusOf(value: unknown, archived = false): ThreadStatus {
   const status = typeof value === "string" ? value.toLowerCase() : value && typeof value === "object" ? text((value as Record<string, unknown>).type || (value as Record<string, unknown>).status || (value as Record<string, unknown>).state).toLowerCase() : "";
   if (archived || status.includes("archiv")) return "completed";
@@ -79,12 +79,12 @@ function titleOf(provider: AgentProvider, record: CodexRawThread | ClaudeRawSess
   const firstMessageText = firstMessage && typeof firstMessage === "object" ? text((firstMessage as Record<string, unknown>).content).slice(0, 96) : "";
   return text(record.objective) || text(record.prompt) || text(record.summary) || firstMessageText || `${provider === "codex" ? "Codex" : "Claude"} ${id.slice(0, 8)}`;
 }
-function rawId(provider: AgentProvider, record: CodexRawThread | ClaudeRawSession) { return provider === "codex" ? text((record as CodexRawThread).id) : text((record as ClaudeRawSession).id) || text((record as ClaudeRawSession).sessionId) || text((record as ClaudeRawSession).session_id); }
-function parentRaw(provider: AgentProvider, record: CodexRawThread | ClaudeRawSession) { return provider === "codex" ? text((record as CodexRawThread).parentThreadId) || text((record as CodexRawThread).parent_thread_id) || text(codexSpawn(record as CodexRawThread)?.parent_thread_id) : text((record as ClaudeRawSession).parentId) || text((record as ClaudeRawSession).parentSessionId) || text((record as ClaudeRawSession).parent_session_id); }
+function rawId(provider: AgentProvider, record: CodexRawThread | ClaudeRawSession | PiRawTicket) { return provider === "codex" ? text((record as CodexRawThread).id) : provider === "pi" ? text((record as PiRawTicket).filePath) : text((record as ClaudeRawSession).id) || text((record as ClaudeRawSession).sessionId) || text((record as ClaudeRawSession).session_id); }
+function parentRaw(provider: AgentProvider, record: CodexRawThread | ClaudeRawSession | PiRawTicket) { return provider === "codex" ? text((record as CodexRawThread).parentThreadId) || text((record as CodexRawThread).parent_thread_id) || text(codexSpawn(record as CodexRawThread)?.parent_thread_id) : text((record as ClaudeRawSession).parentId) || text((record as ClaudeRawSession).parentSessionId) || text((record as ClaudeRawSession).parent_session_id); }
 
 function mapSnapshot(snapshot: ProviderSnapshot): NormalizedState {
   const provider = snapshot.provider;
-  const records = (provider === "codex" ? snapshot.threads.filter((record) => !isGuardian(record)) : snapshot.sessions);
+  const records: any[] = provider === "codex" ? snapshot.threads.filter((record) => !isGuardian(record)) : provider === "claude" ? snapshot.sessions : snapshot.tickets;
   const state: NormalizedState = { folders: {}, threads: {}, events: {} };
   const rawIds = new Set(records.map((record) => rawId(provider, record)).filter(Boolean));
   const projectPaths = snapshot.projects || [];
@@ -117,9 +117,10 @@ function mapSnapshot(snapshot: ProviderSnapshot): NormalizedState {
     const parentId = rawParent && rawIds.has(rawParent) ? providerThreadId(provider, rawParent) : undefined;
     const title = titleOf(provider, record, id);
     const codex = record as CodexRawThread;
-    state.threads[stateId] = { id: stateId, key: id.slice(0, 8).toUpperCase(), folderId: folderId(cwd), parentId, title, objective: text(record.objective) || text(record.prompt) || text(record.summary) || text(codex.preview).slice(0, 420) || title, summary: text(record.summary) || text(codex.preview).slice(0, 220) || `${normalizedStatus.replace("_", " ")} · ${providerMeta(provider).label}`, profile: provider === "codex" ? (text(codexSpawn(codex)?.agent_role) || "codex-agent") : ((record as ClaudeRawSession).isSidechain ? "claude-subagent" : "claude-agent"), status: normalizedStatus, model: text(record.model) || providerMeta(provider).label, reasoningEffort: text(codex.reasoningEffort) || text(codex.reasoning_effort) || "default", permission: permission(record.permissionMode || record.permission), branch: text(record.branch) || text((codex.gitInfo as Record<string, unknown> | undefined)?.branch) || undefined, startedAt: date(record.startedAt ?? record.createdAt ?? record.created_at), updatedAt, finishedAt: date(record.finishedAt), archived: Boolean(record.archived), provider, recentlyActiveExternally, attention: normalizedStatus === "needs_attention" ? { kind: "input", message: `${providerMeta(provider).label} is waiting for attention.` } : undefined };
+    const pi = record as PiRawTicket;
+    state.threads[stateId] = { id: stateId, key: id.slice(0, 8).toUpperCase(), folderId: folderId(cwd), parentId, title, objective: text(record.objective) || text(record.prompt) || text(record.summary) || text(codex.preview).slice(0, 420) || title, summary: text(record.summary) || text(codex.preview).slice(0, 220) || `${normalizedStatus.replace("_", " ")} · ${providerMeta(provider).label}`, profile: provider === "codex" ? (text(codexSpawn(codex)?.agent_role) || "codex-agent") : provider === "pi" ? "markdown-ticket" : ((record as ClaudeRawSession).isSidechain ? "claude-subagent" : "claude-agent"), status: normalizedStatus, model: text(record.model) || providerMeta(provider).label, reasoningEffort: text(codex.reasoningEffort) || text(codex.reasoning_effort) || "default", permission: permission(record.permissionMode || record.permission), branch: text(record.branch) || text((codex.gitInfo as Record<string, unknown> | undefined)?.branch) || undefined, startedAt: date(record.startedAt ?? record.createdAt ?? record.created_at), updatedAt, finishedAt: date(record.finishedAt), archived: Boolean(record.archived), provider, acceptanceCriteria: provider === "pi" ? pi.acceptanceCriteria : undefined, recentlyActiveExternally, attention: normalizedStatus === "needs_attention" ? { kind: "input", message: `${providerMeta(provider).label} is waiting for attention.` } : undefined };
   });
-  (snapshot.events || []).forEach((event, index) => {
+  ((snapshot as { events?: ProviderEventRecord[] }).events || []).forEach((event, index) => {
     const rawThread = text(event.threadId) || text(event.thread_id); const id = rawThread ? providerThreadId(provider, rawThread) : "";
     if (!id || !state.threads[id]) return;
     const eventId = `${provider}:${text(event.id) || `event-${index}`}`;
@@ -131,11 +132,12 @@ function mapSnapshot(snapshot: ProviderSnapshot): NormalizedState {
 
 export function normalizeCodex(snapshot: Omit<CodexSnapshot, "provider"> | CodexSnapshot) { return mapSnapshot({ ...snapshot, provider: "codex" }); }
 export function normalizeClaude(snapshot: Omit<ClaudeSnapshot, "provider"> | ClaudeSnapshot) { return mapSnapshot({ ...snapshot, provider: "claude" }); }
+export function normalizePi(snapshot: Omit<PiSnapshot, "provider"> | PiSnapshot) { return mapSnapshot({ ...snapshot, provider: "pi" }); }
 export function mergeNormalizedStates(...states: NormalizedState[]): NormalizedState {
   return states.reduce((merged, state) => ({ folders: { ...merged.folders, ...state.folders }, threads: { ...merged.threads, ...state.threads }, events: { ...merged.events, ...state.events } }), { ...EMPTY });
 }
-export function normalizeProviders(input: { codex?: Omit<CodexSnapshot, "provider"> | CodexSnapshot; claude?: Omit<ClaudeSnapshot, "provider"> | ClaudeSnapshot }): NormalizedState {
-  return mergeNormalizedStates(input.codex ? normalizeCodex(input.codex) : EMPTY, input.claude ? normalizeClaude(input.claude) : EMPTY);
+export function normalizeProviders(input: { codex?: Omit<CodexSnapshot, "provider"> | CodexSnapshot; claude?: Omit<ClaudeSnapshot, "provider"> | ClaudeSnapshot; pi?: Omit<PiSnapshot, "provider"> | PiSnapshot }): NormalizedState {
+  return mergeNormalizedStates(input.codex ? normalizeCodex(input.codex) : EMPTY, input.claude ? normalizeClaude(input.claude) : EMPTY, input.pi ? normalizePi(input.pi) : EMPTY);
 }
 export function filterByProvider(state: NormalizedState, provider?: AgentProvider): NormalizedState {
   if (!provider) return state;
@@ -143,6 +145,6 @@ export function filterByProvider(state: NormalizedState, provider?: AgentProvide
   const threadIds = new Set(Object.keys(threads));
   return { folders: Object.fromEntries(Object.entries(state.folders).filter(([, folder]) => Object.values(threads).some((thread) => thread.folderId === folder.id))), threads, events: Object.fromEntries(Object.entries(state.events).filter(([, event]) => threadIds.has(event.threadId))) };
 }
-export function providerCounts(state: NormalizedState) { return { codex: Object.values(state.threads).filter((thread) => thread.provider === "codex").length, claude: Object.values(state.threads).filter((thread) => thread.provider === "claude").length }; }
+export function providerCounts(state: NormalizedState) { return { codex: Object.values(state.threads).filter((thread) => thread.provider === "codex").length, claude: Object.values(state.threads).filter((thread) => thread.provider === "claude").length, pi: Object.values(state.threads).filter((thread) => thread.provider === "pi").length }; }
 
-export type { ClaudeSnapshot, CodexSnapshot, ProviderEventRecord, ProviderMeta, ProviderSnapshot } from "./types";
+export type { ClaudeSnapshot, CodexSnapshot, PiSnapshot, ProviderEventRecord, ProviderMeta, ProviderSnapshot } from "./types";

@@ -34,7 +34,7 @@ type Store = NormalizedState & {
   updateThread: (id: string, patch: Partial<AgentThread>) => Promise<AgentThread>;
   archiveThread: (id: string, strategy?: "tree" | "reparent") => Promise<void>;
   unarchiveThread: (id: string) => Promise<void>;
-  deleteThread: (id: string, options?: { permanent?: boolean }) => Promise<{ deleted: boolean; sessionId: string; deletedSessionIds: string[]; deletedPathsCount: number; bytesFreed: number; permanent: boolean } | undefined>;
+  deleteThread: (id: string) => Promise<void>;
   addEvent: (event: AgentEvent) => void;
   filteredThreads: () => AgentThread[];
 };
@@ -79,7 +79,7 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
   viewMode: "map",
   query: "",
   connectionStatus: "loading",
-  providerConnections: { codex: "loading", claude: "loading" },
+  providerConnections: { codex: "loading", claude: "loading", pi: "loading" },
   selectFolder: (selectedFolderId) => set({ selectedFolderId, selectedThreadId: undefined }),
   selectThread: (selectedThreadId) => set({ selectedThreadId }),
   setViewMode: (viewMode) => set({ viewMode }),
@@ -93,16 +93,16 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
     syncInFlight = (async () => {
       const desktop = window.constellationDesktop;
       if (!desktop) {
-        set({ ...mockState, connectionStatus: "demo", providerConnections: { codex: "demo", claude: "demo" }, connectionError: undefined, lastSyncedAt: new Date().toISOString() });
+        set({ ...mockState, connectionStatus: "demo", providerConnections: { codex: "demo", claude: "demo", pi: "demo" }, connectionError: undefined, lastSyncedAt: new Date().toISOString() });
         return;
       }
       if (!Object.keys(get().threads).length) set({ connectionStatus: "loading", connectionError: undefined });
-      const [codexResult, claudeResult] = await Promise.allSettled([desktop.codex.getSnapshot(), desktop.claude.getSnapshot()]);
-      const providerConnections: ProviderConnections = { codex: codexResult.status === "fulfilled" && codexResult.value.connected !== false ? "connected" : "offline", claude: claudeResult.status === "fulfilled" && claudeResult.value.connected !== false ? "connected" : "offline" };
+      const [codexResult, claudeResult, piResult] = await Promise.allSettled([desktop.codex.getSnapshot(), desktop.claude.getSnapshot(), desktop.pi.getSnapshot()]);
+      const providerConnections: ProviderConnections = { codex: codexResult.status === "fulfilled" && codexResult.value.connected !== false ? "connected" : "offline", claude: claudeResult.status === "fulfilled" && claudeResult.value.connected !== false ? "connected" : "offline", pi: piResult.status === "fulfilled" && piResult.value.connected !== false ? "connected" : "offline" };
       try {
-        if (codexResult.status === "rejected" && claudeResult.status === "rejected") throw new Error(`Codex: ${String(codexResult.reason)} · Claude: ${String(claudeResult.reason)}`);
+        if (codexResult.status === "rejected" && claudeResult.status === "rejected" && piResult.status === "rejected") throw new Error(`Codex: ${String(codexResult.reason)} · Claude: ${String(claudeResult.reason)}`);
         const codexSnapshot = codexResult.status === "fulfilled" ? { ...codexResult.value, threads: extractThreads(codexResult.value.threads) } : undefined;
-        const normalized = normalizeProviders({ codex: codexSnapshot, claude: claudeResult.status === "fulfilled" ? claudeResult.value : undefined });
+        const normalized = normalizeProviders({ codex: codexSnapshot, claude: claudeResult.status === "fulfilled" ? claudeResult.value : undefined, pi: piResult.status === "fulfilled" ? piResult.value : undefined });
         set((state) => ({
           ...normalized,
           connectionStatus: "connected",
@@ -137,6 +137,12 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
     const desktop = window.constellationDesktop;
     const provider = input.parentId ? get().threads[input.parentId]?.provider ?? input.provider ?? "codex" : input.provider ?? "codex";
     if (desktop) {
+      if (provider === "pi") {
+        const created = await desktop.pi.createTicket({ cwd: folder.path, title: input.title, objective: input.objective, acceptanceCriteria: input.acceptanceCriteria });
+        await get().syncFromSource();
+        const filePath = created && typeof created === "object" && "filePath" in created ? String((created as { filePath: string }).filePath) : "";
+        return get().threads[`pi:${filePath}`];
+      }
       if (provider === "claude") {
         if (input.parentId) {
           const parent = splitProviderThreadId(input.parentId);
@@ -173,7 +179,8 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
     if (desktop) {
       const folder = get().folders[thread.folderId];
       const { provider, rawId } = splitProviderThreadId(threadId);
-      if (provider === "claude") await desktop.claude.updateSession({ sessionId: rawId, title: patch.title });
+      if (provider === "pi") await desktop.pi.updateTicket({ filePath: rawId, title: patch.title, objective: patch.objective, acceptanceCriteria: patch.acceptanceCriteria?.map((item) => item.text) });
+      else if (provider === "claude") await desktop.claude.updateSession({ sessionId: rawId, title: patch.title });
       else await desktop.codex.updateThread({ threadId: rawId, cwd: folder.path, title: patch.title, model: patch.model, reasoningEffort: patch.reasoningEffort, permission: patch.permission });
       await get().syncFromSource();
       return get().threads[threadId];
@@ -184,28 +191,25 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
   },
   archiveThread: async (threadId, strategy = "tree") => {
     const desktop = window.constellationDesktop;
-    if (desktop) { const { provider, rawId } = splitProviderThreadId(threadId); if (provider === "claude") await desktop.claude.archiveSession(rawId); else await desktop.codex.archiveThread(rawId); await get().syncFromSource(); return; }
+    if (desktop) { const { provider, rawId } = splitProviderThreadId(threadId); if (provider === "pi") throw new Error("Pi markdown tickets do not support archive yet."); else if (provider === "claude") await desktop.claude.archiveSession(rawId); else await desktop.codex.archiveThread(rawId); await get().syncFromSource(); return; }
     set((state) => ({ threads: localArchive(state, threadId, strategy) }));
   },
   unarchiveThread: async (threadId) => {
     const desktop = window.constellationDesktop;
-    if (desktop) { const { provider, rawId } = splitProviderThreadId(threadId); if (provider === "claude") await desktop.claude.unarchiveSession(rawId); else await desktop.codex.unarchiveThread(rawId); await get().syncFromSource(); return; }
+    if (desktop) { const { provider, rawId } = splitProviderThreadId(threadId); if (provider === "pi") throw new Error("Pi markdown tickets do not support archive yet."); else if (provider === "claude") await desktop.claude.unarchiveSession(rawId); else await desktop.codex.unarchiveThread(rawId); await get().syncFromSource(); return; }
     set((state) => ({ threads: { ...state.threads, [threadId]: { ...state.threads[threadId], archived: false } } }));
   },
-  deleteThread: async (threadId, options) => {
+  deleteThread: async (threadId) => {
     const desktop = window.constellationDesktop;
     if (desktop) {
       const thread = get().threads[threadId];
-      if (!thread) return undefined;
+      if (!thread) return;
       const { provider, rawId } = splitProviderThreadId(threadId);
-      if (provider === "claude") {
-        const result = await desktop.claude.deleteSession(rawId, { permanent: options?.permanent === true });
-        await get().syncFromSource();
-        return result;
-      }
-      await desktop.codex.deleteThread(rawId);
+      if (provider === "pi") throw new Error("Pi markdown tickets are edited or removed in the project workspace.");
+      else if (provider === "claude") await desktop.claude.deleteSession(rawId);
+      else await desktop.codex.deleteThread(rawId);
       await get().syncFromSource();
-      return undefined;
+      return;
     }
     set((state) => {
       const ids = descendantThreadIds(state, threadId);
@@ -216,7 +220,6 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
       const selectedThreadId = state.selectedThreadId && ids.has(state.selectedThreadId) ? undefined : state.selectedThreadId;
       return { threads, events, selectedThreadId };
     });
-    return undefined;
   },
   addEvent: (event) => set((state) => ({ events: { ...state.events, [event.id]: event } })),
   filteredThreads: () => {

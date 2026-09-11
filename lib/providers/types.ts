@@ -86,6 +86,28 @@ export interface CodexSnapshot {
   events?: ProviderEventRecord[];
 }
 
+export interface PiRawTicket {
+  id: string;
+  cwd: string;
+  filePath: string;
+  title?: string;
+  objective?: string;
+  summary?: string;
+  status?: string;
+  state?: string;
+  priority?: string;
+  labels?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+  acceptanceCriteria?: { text: string; completed: boolean; line?: number }[];
+}
+
+export interface PiSnapshot {
+  provider: "pi";
+  tickets: PiRawTicket[];
+  projects?: string[];
+}
+
 export interface ClaudeSnapshot {
   provider: "claude";
   sessions: ClaudeRawSession[];
@@ -93,12 +115,12 @@ export interface ClaudeSnapshot {
   events?: ProviderEventRecord[];
 }
 
-export type ProviderSnapshot = CodexSnapshot | ClaudeSnapshot;
+export type ProviderSnapshot = CodexSnapshot | ClaudeSnapshot | PiSnapshot;
 
 export interface ProviderMeta {
   provider: AgentProvider;
   label: string;
   shortLabel: string;
   color: string;
-  icon: "codex" | "claude";
+  icon: "codex" | "claude" | "pi";
 }

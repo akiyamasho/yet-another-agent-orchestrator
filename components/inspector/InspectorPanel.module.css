@@ -269,6 +269,8 @@
 .card p:last-child {
     margin-bottom: 0;
 }
+.ticketProgress { display: flex; align-items: center; gap: 10px; margin: 6px 0 14px; color: #c49a6c; font: 11px var(--font-mono); }
+.ticketProgress progress { flex: 1; height: 6px; accent-color: #c49a6c; }
 .card .objective {
     color: #eff5fc;
     font-size: 15px;

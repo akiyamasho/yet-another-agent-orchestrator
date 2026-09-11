@@ -39,6 +39,7 @@ function StatusGlyph({ status }: { status: ThreadStatus }) {
 const providerMeta = {
   codex: { label: "Codex", short: "C", color: "#7aa7b8" },
   claude: { label: "Claude Code", short: "A", color: "#d97757" },
+  pi: { label: "Pi tickets", short: "PI", color: "#c49a6c" },
 } as const;
 
 function getProvider(thread: AgentThread) {
@@ -57,17 +58,18 @@ function FolderNode({ data }: NodeProps<MapNode>) {
   const folderThreads = Object.values(useConstellationStore.getState().threads).filter((thread) => !thread.archived && thread.folderId === folder.id);
   const codexCount = folderThreads.filter((thread) => (thread.provider ?? "codex") === "codex").length;
   const claudeCount = folderThreads.filter((thread) => thread.provider === "claude").length;
+  const piCount = folderThreads.filter((thread) => thread.provider === "pi").length;
   const liveLabel = `${live} live`;
   const recentLabel = `${recent} recent`;
   const attentionLabel = `${attention} needs you`;
-  return <button className={`${styles.folderNode} ${live ? styles.folderLive : ""} ${attention ? styles.folderNeedsAttention : ""}`} style={{ "--accent": folder.accent } as React.CSSProperties} onClick={onSelect} aria-label={`Focus ${folder.name} folder, ${codexCount} Codex and ${claudeCount} Claude Code tasks, ${liveLabel}, ${recentLabel}, ${attentionLabel}`}>
+  return <button className={`${styles.folderNode} ${live ? styles.folderLive : ""} ${attention ? styles.folderNeedsAttention : ""}`} style={{ "--accent": folder.accent } as React.CSSProperties} onClick={onSelect} aria-label={`Focus ${folder.name} folder, ${codexCount} Codex, ${claudeCount} Claude Code, and ${piCount} Pi ticket tasks, ${liveLabel}, ${recentLabel}, ${attentionLabel}`}>
     <ConstellationHandles/>
     <span className={styles.folderOrbit} />
     <span className={styles.folderGlyph}><Sparkles size={20} /></span>
     <strong>{folder.name}</strong>
     <small>{count} {count === 1 ? "thread" : "threads"}</small>
     <span className={styles.folderStateSummary} aria-label={`${liveLabel}, ${recentLabel}, ${attentionLabel}`}><span className={styles.folderLiveCount}>{liveLabel}</span><span className={styles.folderRecentCount}>{recentLabel}</span><span className={styles.folderAttentionCount}>{attentionLabel}</span></span>
-    <span className={styles.providerCounts}><span className={styles.codexMark}>C {codexCount}</span><span className={styles.claudeMark}>A {claudeCount}</span></span>
+    <span className={styles.providerCounts}><span className={styles.codexMark}>C {codexCount}</span><span className={styles.claudeMark}>A {claudeCount}</span><span className={styles.piMark}>PI {piCount}</span></span>
   </button>;
 }
 

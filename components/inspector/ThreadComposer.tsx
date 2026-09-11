@@ -3,7 +3,7 @@
 import { memo, useEffect, useMemo, useState, type ClipboardEvent } from "react";
 import { File, FileImage, LoaderCircle, Paperclip, Send, Square, X } from "lucide-react";
 import { splitProviderThreadId } from "@/lib/providers";
-import type { AgentThread } from "@/lib/types";
+import type { AgentProvider, AgentThread } from "@/lib/types";
 import styles from "./ThreadComposer.module.css";
 
 type Attachment = { path: string; name: string; size: number; isImage: boolean };
@@ -176,7 +176,7 @@ function formatBytes(value: number) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function composerError(cause: unknown, provider: "codex" | "claude") {
+function composerError(cause: unknown, provider: AgentProvider) {
   const raw = cause instanceof Error ? cause.message : String(cause);
   if (provider === "codex" && /already has an active writer/i.test(raw)) {
     return "This Codex task is open in another Codex window, which currently owns the live session. Continue it there, or close that task there and retry here.";

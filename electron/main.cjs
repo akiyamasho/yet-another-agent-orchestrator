@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { CodexAppServerBridge } = require("./codex/app-server-bridge.cjs");
 const { ClaudeCodeProvider } = require("./claude/provider.cjs");
+const { PiMarkdownProvider } = require("./pi/provider.cjs");
 const { normalizeCodexTimeline, normalizeClaudeTimeline } = require("./chat/timeline.cjs");
 const { cleanupClipboardImages, saveClipboardImage, saveClipboardImageBytes } = require("./attachments/clipboard-image.cjs");
 const { GitHubReleaseUpdater } = require("./updater/github-release-updater.cjs");
@@ -12,6 +13,7 @@ let mainWindow = null;
 let codexBridge = null;
 let codexConnectPromise = null;
 let claudeProvider = null;
+let piProvider = null;
 let releaseUpdater = null;
 const recentEvents = [];
 const recentClaudeEvents = [];
@@ -21,6 +23,12 @@ const allowedProjectRoots = new Set();
 const attachmentGrants = new Map();
 const MAX_ATTACHMENTS = 10;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+function ensurePi() {
+  if (!piProvider) piProvider = new PiMarkdownProvider({ roots: readProjects() });
+  piProvider.roots = readProjects();
+  return piProvider;
+}
 
 function findCodexBinary() {
   const candidates = [
@@ -523,6 +531,12 @@ function registerIpc() {
   ipcMain.handle("codex:unarchive-thread", async (_event, threadId) => (await ensureCodex()).unarchiveThread(String(threadId)));
   ipcMain.handle("codex:delete-thread", (_event, threadId) => deleteCodex(threadId));
   ipcMain.handle("claude:snapshot", () => claudeSnapshot());
+  ipcMain.handle("pi:snapshot", () => ensurePi().snapshot());
+  ipcMain.handle("pi:read-ticket", (_event, filePath) => ensurePi().readTicket(String(filePath)));
+  ipcMain.handle("pi:create-ticket", (_event, input) => ensurePi().createTicket(input));
+  ipcMain.handle("pi:update-ticket", (_event, input) => ensurePi().updateTicket(input));
+  ipcMain.handle("pi:dispatch", (_event, filePath) => ensurePi().dispatch(String(filePath)));
+  ipcMain.handle("pi:interrupt", (_event, filePath) => ensurePi().interrupt(String(filePath)));
   ipcMain.handle("claude:read-session", async (_event, sessionId) => normalizeClaudeTimeline(await ensureClaude().readSession(String(sessionId))));
   ipcMain.handle("claude:continue-session", (_event, input) => startClaude({ ...input, objective: input.message }, true));
   ipcMain.handle("claude:interrupt-session", (_event, sessionId) => ensureClaude().interruptSession(String(sessionId)));

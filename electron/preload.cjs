@@ -52,6 +52,14 @@ contextBridge.exposeInMainWorld("constellationDesktop", {
       return () => ipcRenderer.removeListener("codex:connection", handler);
     },
   },
+  pi: {
+    getSnapshot: () => ipcRenderer.invoke("pi:snapshot"),
+    readTicket: (filePath) => ipcRenderer.invoke("pi:read-ticket", filePath),
+    createTicket: (input) => ipcRenderer.invoke("pi:create-ticket", input),
+    updateTicket: (input) => ipcRenderer.invoke("pi:update-ticket", input),
+    dispatch: (filePath) => ipcRenderer.invoke("pi:dispatch", filePath),
+    interrupt: (filePath) => ipcRenderer.invoke("pi:interrupt", filePath),
+  },
   claude: {
     getSnapshot: () => ipcRenderer.invoke("claude:snapshot"),
     readSession: (sessionId) => ipcRenderer.invoke("claude:read-session", sessionId),
