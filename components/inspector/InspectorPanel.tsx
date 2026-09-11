@@ -6,7 +6,7 @@ import { AgentChatTimeline, type ChatTimeline } from "@/components/chat/AgentCha
 import { ThreadComposer } from "@/components/inspector/ThreadComposer";
 import { providerMeta, splitProviderThreadId } from "@/lib/providers";
 import { useConstellationStore } from "@/lib/store/useConstellationStore";
-import type { ThreadStatus } from "@/lib/types";
+import type { AgentThread, ThreadStatus } from "@/lib/types";
 import { classifyLiveness, formatLivenessNotice } from "@/lib/runtime/liveness";
 import styles from "./InspectorPanel.module.css";
 
@@ -24,6 +24,8 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string>();
   const [runActionError, setRunActionError] = useState<string>();
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const recoveryInFlight = useRef(false);
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [focusedPreview, setFocusedPreview] = useState<{ path: string; dataUrl: string; name: string }>();
   const previewRequests = useRef(new Set<string>());
@@ -255,6 +257,21 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
       window.setTimeout(() => void refreshDetail(false), 700);
     } catch (error) { setRunActionError(error instanceof Error ? error.message : String(error)); }
   };
+  const runPiRecoveryAction = async (action: (runId: string) => Promise<void>) => {
+    if (!thread.runId || !window.constellationDesktop || recoveryInFlight.current) return;
+    recoveryInFlight.current = true;
+    setRecoveryBusy(true);
+    setRunActionError(undefined);
+    try { await action(thread.runId); }
+    catch (error) { setRunActionError(error instanceof Error ? error.message : String(error)); }
+    finally { recoveryInFlight.current = false; setRecoveryBusy(false); }
+  };
+  const retryReview = () => void runPiRecoveryAction(useConstellationStore.getState().retryPiReview);
+  const retryIntegration = () => void runPiRecoveryAction(useConstellationStore.getState().retryPiIntegration);
+  const cleanupRun = () => {
+    if (!thread.runId || !window.confirm("Clean up this verified Pi worktree? This removes the worktree but does not delete project history.")) return;
+    void runPiRecoveryAction(useConstellationStore.getState().cleanupPiRun);
+  };
   const stopPiTicket = async () => {
     if (!selectedThreadId || thread.provider !== "pi" || !window.constellationDesktop) return;
     setRunActionError(undefined);
@@ -276,9 +293,10 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
       <div className={styles.meta}><span className={`${styles.status} ${styles[thread.status]} ${liveness.state === "possibly_stalled" ? styles.possiblyStalled : liveness.state === "quiet" ? styles.quiet : ""}`}><i />{displayedStatus}</span><span><Clock3 size={13} /> {formatTime(thread.startedAt)}</span><span>{thread.model}</span><span>{thread.reasoningEffort}</span></div>
       {thread.status === "running" && liveness.state !== "active" && liveness.state !== "unknown" && <div className={`${styles.livenessNotice} ${liveness.state === "possibly_stalled" ? styles.stalledNotice : ""}`} role="status"><CircleAlert size={14}/><span><strong>{formatLivenessNotice(liveness)}</strong>. This may be a long-running command; inspect the original {provider.label} task if it needs attention.</span></div>}
       {runActionError && <p className={styles.error} role="alert">{runActionError} <button type="button" onClick={() => setRunActionError(undefined)}>Dismiss</button></p>}
+      {thread.provider === "pi" && thread.piKind === "run" && <PiRunRecovery thread={thread} recoveryBusy={recoveryBusy} onRetryReview={retryReview} onRetryIntegration={retryIntegration} onCleanup={cleanupRun} />}
       <div className={styles.actions}>
         {isMapView && onBackToNow && <button className={styles.primary} onClick={onBackToNow}><RotateCcw size={14}/> Back to Now</button>}
-        {thread.provider === "pi" && live ? (thread.piKind === "run" ? (thread.runPhase !== "planning" && (thread.status === "running" ? <button className={styles.danger} onClick={() => void stopPiTicket()}><Square size={13}/> Interrupt run</button> : <button className={styles.primary} onClick={() => void runPiTicket()}><RotateCcw size={14}/> Retry run</button>)) : (thread.status === "running" ? <button className={styles.danger} onClick={() => void stopPiTicket()}><Square size={13}/> Interrupt worker</button> : dispatchablePiTicket ? <button className={styles.primary} onClick={() => void runPiTicket()}><Play size={14}/> Dispatch ticket</button> : null)) : null}
+        {thread.provider === "pi" && live ? (thread.piKind === "run" ? (thread.runPhase !== "planning" && (thread.status === "running" ? <button className={styles.danger} onClick={() => void stopPiTicket()}><Square size={13}/> Interrupt run</button> : !["pending_review", "integration_pending", "integrating", "completing", "integrated"].includes(thread.integrationPhase || "") ? <button className={styles.primary} onClick={() => void runPiTicket()}><RotateCcw size={14}/> Retry run</button> : null)) : (thread.status === "running" ? <button className={styles.danger} onClick={() => void stopPiTicket()}><Square size={13}/> Interrupt worker</button> : dispatchablePiTicket ? <button className={styles.primary} onClick={() => void runPiTicket()}><Play size={14}/> Dispatch ticket</button> : null)) : null}
         {!live && (thread.status === "running" ? <><button onClick={() => action("waiting")}><Pause size={14}/> Pause</button><button className={styles.danger} onClick={() => action("idle")}><Square size={13}/> Stop</button></> : <button className={styles.primary} onClick={() => action("running")}><Play size={14}/> {thread.status === "waiting" ? "Resume" : "Run again"}</button>)}
         {thread.piKind !== "run" && <><button onClick={() => onEdit?.(thread.id)}>Rename / edit</button>{thread.provider !== "pi" && <button onClick={() => onArchive?.(thread.id)}>Archive</button>}<button className={styles.danger} onClick={() => onDelete?.(thread.id)}>Delete permanently</button></>}
       </div>
@@ -286,13 +304,37 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
     {attention && <section className={styles.attention} aria-live="polite"><div className={styles.attentionTitle}><CircleAlert size={17}/> Action required</div><strong>{thread.attention?.kind === "approval" ? "Approval requested" : "Input needed"}</strong><p>{thread.attention?.message}</p><small>From {thread.title} · {thread.permission}</small>{live ? <p className={styles.liveNotice}>Respond in the original {provider.label} task. Constellation keeps this read-only until the provider reports the response.</p> : <div className={styles.attentionActions}><button className={styles.primary} onClick={() => setAttentionDone(true)}>Approve once</button><button onClick={() => setAttentionDone(true)}>Always allow…</button><button className={styles.reject} onClick={() => { setAttentionDone(true); action("failed"); }}>Reject</button></div>}</section>}
     <nav className={styles.tabs} aria-label="Inspector sections">{((thread.piKind === "run" ? ["overview", "activity"] : ["chat", "overview", "subagents", "activity"]) as InspectorTab[]).map((name) => <button key={name} className={tab === name ? styles.activeTab : ""} onClick={() => setTab(name)} aria-selected={tab === name} role="tab">{name[0].toUpperCase() + name.slice(1)}{name === "subagents" && children.length ? <b>{children.length}</b> : null}</button>)}</nav>
     <div ref={bodyRef} className={styles.body} role="tabpanel">
-      {tab === "overview" && <><section className={styles.card}>{thread.piKind === "run" ? <><label>Run details</label><p>{piPhaseLabel(thread.runPhase)} · {thread.model}</p><p>{thread.workspace || thread.projectRoot}</p><p>{thread.branch || "No branch"}</p>{thread.error && <p role="alert">{thread.error}</p>}</> : null}<label>Objective</label><p className={styles.objective}>{thread.objective || "No objective provided."}</p><label>What it is doing now</label><p>{thread.summary}</p>{thread.provider === "pi" && thread.acceptanceCriteria?.length ? <div><label>Ticket progress</label><div className={styles.ticketProgress}><progress max={thread.acceptanceCriteria.length} value={thread.acceptanceCriteria.filter((item) => item.completed).length} aria-label={`${thread.title} progress`} /><strong>{thread.acceptanceCriteria.filter((item) => item.completed).length}/{thread.acceptanceCriteria.length}</strong></div><label>Acceptance criteria</label>{thread.acceptanceCriteria.map((item) => <p key={`${item.line}-${item.text}`}><span aria-hidden="true">{item.completed ? "☑" : "☐"}</span> {item.text}</p>)}</div> : null}</section><dl className={styles.details}><div><dt>Provider</dt><dd style={{ color: provider.color }}>{provider.label}</dd></div><div><dt>Parent thread</dt><dd>{thread.parentId ? <button className={styles.link} onClick={() => selectThread(thread.parentId)}>{threads[thread.parentId]?.key ?? "Unknown"}<ChevronRight size={13}/></button> : "Root task"}</dd></div><div><dt>Permission mode</dt><dd>{thread.permission}</dd></div><div><dt>Branch / worktree</dt><dd>{thread.branch ?? "No branch"}</dd></div>{thread.provider === "pi" && thread.piKind === "ticket" && <><div><dt>Ticket state</dt><dd>{thread.ticketState || statusLabel[thread.status]}</dd></div><div><dt>Assignee</dt><dd>{thread.assignee ?? "Unassigned"}</dd></div><div><dt>Blocked by</dt><dd>{thread.blockedBy?.length ? thread.blockedBy.join(", ") : "No dependencies"}</dd></div><div><dt>Issue</dt><dd>{thread.issue || "No ticket issues"}</dd></div></>}</dl></>}
+      {tab === "overview" && <><section className={styles.card}>{thread.piKind === "run" ? <><label>Run details</label><p>{piPhaseLabel(thread.runPhase)} · {thread.model}</p><p>{thread.workspace || thread.projectRoot}</p><p>{thread.branch || "No branch"}</p><p>Integration: {thread.integrationPhase || "—"} · review: {thread.reviewResult?.status || "—"} · cleanup: {thread.cleanupPhase || "not cleaned"}</p><p>Commits: source {shortCommit(thread.sourceHead)} · merge {shortCommit(thread.mergeCommit)} · completion {shortCommit(thread.completionCommit)} · destination {shortCommit(thread.finalDestinationHead)}</p>{thread.error && <p role="alert">{thread.error}</p>}</> : null}<label>Objective</label><p className={styles.objective}>{thread.objective || "No objective provided."}</p><label>What it is doing now</label><p>{thread.summary}</p>{thread.provider === "pi" && thread.acceptanceCriteria?.length ? <div><label>Ticket progress</label><div className={styles.ticketProgress}><progress max={thread.acceptanceCriteria.length} value={thread.acceptanceCriteria.filter((item) => item.completed).length} aria-label={`${thread.title} progress`} /><strong>{thread.acceptanceCriteria.filter((item) => item.completed).length}/{thread.acceptanceCriteria.length}</strong></div><label>Acceptance criteria</label>{thread.acceptanceCriteria.map((item) => <p key={`${item.line}-${item.text}`}><span aria-hidden="true">{item.completed ? "☑" : "☐"}</span> {item.text}</p>)}</div> : null}</section><dl className={styles.details}><div><dt>Provider</dt><dd style={{ color: provider.color }}>{provider.label}</dd></div><div><dt>Parent thread</dt><dd>{thread.parentId ? <button className={styles.link} onClick={() => selectThread(thread.parentId)}>{threads[thread.parentId]?.key ?? "Unknown"}<ChevronRight size={13}/></button> : "Root task"}</dd></div><div><dt>Permission mode</dt><dd>{thread.permission}</dd></div><div><dt>Branch / worktree</dt><dd>{thread.branch ?? "No branch"}</dd></div>{thread.provider === "pi" && thread.piKind === "ticket" && <><div><dt>Ticket state</dt><dd>{thread.ticketState || statusLabel[thread.status]}</dd></div><div><dt>Assignee</dt><dd>{thread.assignee ?? "Unassigned"}</dd></div><div><dt>Blocked by</dt><dd>{thread.blockedBy?.length ? thread.blockedBy.join(", ") : "No dependencies"}</dd></div><div><dt>Issue</dt><dd>{thread.issue || "No ticket issues"}</dd></div></>}</dl></>}
       {tab === "subagents" && <section className={styles.listSection}><div className={styles.sectionHeading}><h3>Child threads</h3><button className={styles.primary} onClick={() => onAddSubagent?.(thread.id)}>Add subagent</button></div>{children.length ? children.map((child) => <button className={styles.child} key={child.id} onClick={() => selectThread(child.id)}><span className={`${styles.statusDot} ${styles[child.status]}`} /><span><strong>{child.title}</strong><small>{child.key} · {child.summary}</small></span><ChevronRight size={15}/></button>) : <p className={styles.empty}>No child threads yet. Add a bounded task to delegate through {provider.label}.</p>}</section>}
       {tab === "activity" && <section className={styles.timeline}>{activity.length ? activity.map((event) => <article key={event.id}><span className={`${styles.eventDot} ${styles[event.type]}`} /><div><strong>{event.title}</strong><p>{event.detail}</p><time>{formatTime(event.timestamp)}</time></div></article>) : <p className={styles.empty}>No activity recorded for this thread.</p>}</section>}
       {tab === "chat" && thread.piKind !== "run" && <section ref={chatOutputRef} className={styles.output}>{focusedPreview && <div className={styles.focusedPreview}><button onClick={() => setFocusedPreview(undefined)} aria-label="Close image preview"><X size={14}/></button><img src={focusedPreview.dataUrl} alt={focusedPreview.name}/><div><strong>{focusedPreview.name}</strong><small>{focusedPreview.path}</small><button onClick={() => void reveal(focusedPreview.path)}>Reveal in Finder</button></div></div>}<AgentChatTimeline timeline={timeline} liveness={liveness} provider={thread.provider ?? "codex"} loading={detailLoading} error={detailError} previews={previews} onPreview={handlePreview} onReveal={handleReveal} /></section>}
     </div>
     {tab === "chat" && thread.piKind !== "run" && thread.provider !== "pi" && <ThreadComposer thread={thread} cwd={folder.path} onSent={handleComposerSent} onCancelled={handleComposerCancelled} cancelRequest={cancelRequest} running={Boolean(live && timeline?.status === "running" && !timeline.externalRuntime)} onRepin={handleComposerRepin} />}
   </aside>;
+}
+
+function shortCommit(value?: string) { return value ? value.slice(0, 8) : "—"; }
+
+function PiRunRecovery({ thread, recoveryBusy, onRetryReview, onRetryIntegration, onCleanup }: { thread: AgentThread; recoveryBusy: boolean; onRetryReview: () => void; onRetryIntegration: () => void; onCleanup: () => void }) {
+  const integrationPhase = thread.integrationPhase;
+  const cleanupPhase = thread.cleanupPhase;
+  const reviewAvailable = integrationPhase === "pending_review";
+  const integrationAvailable = ["integration_pending", "integrating", "completing"].includes(integrationPhase || "");
+  const integrated = integrationPhase === "integrated";
+  const cleanupBusy = cleanupPhase === "active" || cleanupPhase === "cleaning";
+  const cleanupAvailable = integrated && cleanupPhase !== "cleaned";
+  return <section className={styles.piRecovery} aria-label="Pi integration and cleanup" aria-busy={recoveryBusy}>
+    <div className={styles.piRecoveryHeading}><strong>Pi run recovery</strong><span>{integrationPhase || "—"} · cleanup {cleanupPhase || "not cleaned"}</span></div>
+    <div className={styles.piRecoveryMeta}><span>Workspace: {thread.workspace || thread.projectRoot || "—"}</span><span>Branch: {thread.branch || "—"}</span><span>Source {shortCommit(thread.sourceHead)} · merge {shortCommit(thread.mergeCommit)} · completion {shortCommit(thread.completionCommit)} · destination {shortCommit(thread.finalDestinationHead)}</span></div>
+    {thread.integrationError && <p role="alert">Integration: {thread.integrationError}</p>}
+    {thread.cleanupError && <p role="alert">Cleanup: {thread.cleanupError}</p>}
+    <div className={styles.piRecoveryActions}>
+      {recoveryBusy && <span role="status" aria-live="polite">Recovery action in progress…</span>}
+      {reviewAvailable && <button type="button" onClick={onRetryReview} disabled={recoveryBusy} aria-busy={recoveryBusy}>{recoveryBusy ? "Retrying review…" : "Retry review"}</button>}
+      {integrationAvailable && <button type="button" onClick={onRetryIntegration} disabled={recoveryBusy} aria-busy={recoveryBusy}>{recoveryBusy ? "Retrying integration…" : "Retry integration"}</button>}
+      {cleanupAvailable && <button type="button" onClick={onCleanup} disabled={recoveryBusy || cleanupBusy} aria-busy={recoveryBusy}>{recoveryBusy ? "Cleaning up…" : "Clean up worktree"}</button>}
+    </div>
+  </section>;
 }
 
 export default InspectorPanel;

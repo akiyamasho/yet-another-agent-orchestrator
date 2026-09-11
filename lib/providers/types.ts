@@ -129,6 +129,17 @@ export interface PiRawRun {
   objective?: string;
   ticketPath?: string;
   sessionDir?: string;
+  /** Persisted integration/cleanup metadata mirrored by the Pi provider. */
+  integrationPhase?: string;
+  reviewResult?: { status?: string; timestamp?: string; sourceHead?: string };
+  cleanupPhase?: string;
+  sourceHead?: string;
+  mergeCommit?: string;
+  completionCommit?: string;
+  finalDestinationHead?: string;
+  integration?: { phase?: string; cleanup?: { phase?: string; error?: string }; error?: string; sourceHead?: string; mergeCommit?: string; completionCommit?: string; finalDestinationHead?: string; [key: string]: unknown };
+  integrationError?: string;
+  cleanupError?: string;
 }
 export interface PiRunEvent { id?: string; runId: string; event?: string; timestamp?: string | number; phase?: string; status?: string; output?: string; summary?: string; error?: string; [key: string]: unknown; }
 export interface PiSchedulerProject { root: string; enabled?: boolean; running?: number; updatedAt?: string; }

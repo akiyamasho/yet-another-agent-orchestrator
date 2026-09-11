@@ -22,6 +22,16 @@ export interface AgentThread {
   progress?: { completed: number; total: number };
   projectRoot?: string;
   workspace?: string;
+  /** Pi integration and cleanup observability for persisted runs. */
+  integrationPhase?: string;
+  reviewResult?: { status?: string; timestamp?: string; sourceHead?: string };
+  cleanupPhase?: string;
+  sourceHead?: string;
+  mergeCommit?: string;
+  completionCommit?: string;
+  finalDestinationHead?: string;
+  integrationError?: string;
+  cleanupError?: string;
   error?: string;
   attention?: { kind: AttentionKind; message: string };
   issue?: string;

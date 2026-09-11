@@ -4,6 +4,7 @@ const path = require("node:path");
 const { CodexAppServerBridge } = require("./codex/app-server-bridge.cjs");
 const { ClaudeCodeProvider } = require("./claude/provider.cjs");
 const { PiMarkdownProvider } = require("./pi/provider.cjs");
+const { registerPiRecoveryIpc } = require("./pi/recovery-ipc.cjs");
 const { normalizeCodexTimeline, normalizeClaudeTimeline } = require("./chat/timeline.cjs");
 const { cleanupClipboardImages, saveClipboardImage, saveClipboardImageBytes } = require("./attachments/clipboard-image.cjs");
 const { GitHubReleaseUpdater } = require("./updater/github-release-updater.cjs");
@@ -556,6 +557,7 @@ function registerIpc() {
   ipcMain.handle("pi:queue-status", (_event, root) => ensurePi().schedulerStatus(String(root)));
   ipcMain.handle("pi:dispatch-next", (_event, root) => ensurePi().dispatchNext(String(root)));
   ipcMain.handle("pi:retry", (_event, filePath) => ensurePi().retry(String(filePath)));
+  registerPiRecoveryIpc(ipcMain, ensurePi);
   ipcMain.handle("claude:read-session", async (_event, sessionId) => normalizeClaudeTimeline(await ensureClaude().readSession(String(sessionId))));
   ipcMain.handle("claude:continue-session", (_event, input) => startClaude({ ...input, objective: input.message }, true));
   ipcMain.handle("claude:interrupt-session", (_event, sessionId) => ensureClaude().interruptSession(String(sessionId)));

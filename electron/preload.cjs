@@ -66,6 +66,9 @@ contextBridge.exposeInMainWorld("constellationDesktop", {
     queueStatus: (root) => ipcRenderer.invoke("pi:queue-status", root),
     dispatchNext: (root) => ipcRenderer.invoke("pi:dispatch-next", root),
     retry: (filePath) => ipcRenderer.invoke("pi:retry", filePath),
+    retryReview: (runId) => ipcRenderer.invoke("pi:retry-review", { runId }),
+    retryIntegration: (runId) => ipcRenderer.invoke("pi:retry-integration", { runId }),
+    cleanupRun: (runId) => ipcRenderer.invoke("pi:cleanup-run", { runId }),
   },
   claude: {
     getSnapshot: () => ipcRenderer.invoke("claude:snapshot"),

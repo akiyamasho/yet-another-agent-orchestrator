@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const { spawn: spawnProcess, execFileSync } = require('node:child_process');
 const { parseTicket, updateTicketAtomic } = require('./tickets.cjs');
 const { parseWorkflow, PI_WORKFLOW_MODELS } = require('./workflow.cjs');
-const { preflight, captureReviewed, reconcileIntegration, integrateReviewed } = require('./integration.cjs');
+const { preflight, captureReviewed, reconcileIntegration, integrateReviewed, cleanupWorktree, worktreeEntries } = require('./integration.cjs');
 const { loadState, saveState, appendRun, reconcileState, safeProjectPath, projectStateFiles } = require('./state.cjs');
 
 function walkTickets(root) {
@@ -69,6 +69,10 @@ function validatePlannerPlan(plan, existing = []) {
   if (items.some((x) => x !== root && x.state && x.state !== 'todo')) throw new Error('Planner children must be todo.');
   return items;
 }
+function validateRecoveryRunId(value) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 200 || !/^[A-Za-z0-9._:-]+$/.test(value)) throw new Error('Malformed Pi run ID.');
+  return value;
+}
 function runId(prefix = 'pi', scope = '') {
   const projectKey = scope ? crypto.createHash('sha1').update(path.resolve(scope)).digest('hex').slice(0, 8) : 'global';
   return `${prefix}-${projectKey}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -85,10 +89,11 @@ function assertPiWorkflowModels(workflow) {
 }
 
 class PiMarkdownProvider {
-  constructor({ roots = [], spawn = spawnProcess, execFile = execFileSync, integrationRetryMax = 5, integrationRetryBaseDelay = 100 } = {}) {
+  constructor({ roots = [], spawn = spawnProcess, execFile = execFileSync, isProcessAlive, integrationRetryMax = 5, integrationRetryBaseDelay = 100 } = {}) {
     this.roots = [...new Set(roots.map(canonicalRoot))];
     this.spawn = spawn;
     this.execFile = execFile;
+    this.isProcessAlive = isProcessAlive || ((pid) => { try { process.kill(pid, 0); return true; } catch (error) { if (error?.code === 'ESRCH') return false; throw error; } });
     this.children = new Map();
     this.outputs = new Map();
     this.queueTimers = new Map();
@@ -125,7 +130,7 @@ class PiMarkdownProvider {
     const live = new Set([...this.children.values()].map((entry) => entry.child.pid));
     const liveRetries = new Set([...this.retryTimers.values(), ...this.integrationRetryTimers.values()].map((pending) => pending.runId));
     for (const root of this.roots) {
-      const state = reconcileState(root, loadState(root), live, liveRetries);
+      let state = reconcileState(root, loadState(root), live, liveRetries);
       for (const [key, claim] of Object.entries(state.claims || {})) {
         if (!claim.integration || !['pending_review', 'integration_pending', 'integrating', 'completing', 'integrated'].includes(claim.integration.phase)) continue;
         try {
@@ -136,7 +141,6 @@ class PiMarkdownProvider {
           if (claim.integration.phase === 'pending_review') {
             claim.phase = 'needs_attention'; claim.status = 'needs_attention';
             claim.error = 'Review interrupted; retry review.';
-            claim.integration = { ...claim.integration, phase: 'needs_attention' };
             state.runs[claim.runId] = { ...state.runs[claim.runId], ...claim };
             appendRun(root, { event: 'needs_attention', runId: claim.runId, ticketId: claim.ticketId, error: claim.error });
             this.runtimeStatuses.set(claim.ticketPath, 'needs_attention');
@@ -144,7 +148,15 @@ class PiMarkdownProvider {
           }
           // Integrated claims are historical records. Reconciliation must never
           // re-finalize them when a later integration has moved HEAD.
-          if (claim.integration.phase === 'integrated') continue;
+          if (claim.integration.phase === 'integrated') {
+            if (claim.integration.cleanup?.phase === 'cleaned' || claim.integration.cleanup?.phase === 'needs_attention' || (claim.integration.cleanup?.phase && !['pending', 'cleaning'].includes(claim.integration.cleanup.phase))) continue;
+            try { this.cleanupRun(claim.runId, { automatic: true }); state = loadState(root); }
+            catch (error) { claim.integration = { ...claim.integration, cleanup: { ...(claim.integration.cleanup || {}), phase: 'needs_attention', error: error.message, failedAt: new Date().toISOString() } }; claim.status = 'needs_attention'; claim.error = error.message; state.claims[key] = claim; state.runs[claim.runId] = { ...state.runs[claim.runId], ...claim }; appendRun(root, { event: 'cleanup-needs-attention', runId: claim.runId, ticketId: claim.ticketId, error: error.message }); }
+            continue;
+          }
+          // Manual recovery failures retain a retryable integration sub-phase,
+          // but must wait for an explicit retry rather than replaying on reload.
+          if (claim.phase === 'needs_attention') continue;
           const result = reconcileIntegration({ metadata: claim.integration, execFile: this.execFile });
           claim.integration = result;
           if (['integration_pending', 'integrating', 'completing'].includes(result.phase)) {
@@ -172,6 +184,103 @@ class PiMarkdownProvider {
     if (path.resolve(claim.integration.sourceTicketPath || expectedTicket) !== path.resolve(expectedTicket)) throw new Error('Integration metadata points to a different ticket workspace.');
     return ticket;
   }
+  cleanupPids(root, claim) {
+    const pids = new Set();
+    for (const [id, entry] of this.children) if ((entry.root || entry.ticket?.cwd) === root && (entry.ticket?.filePath === claim.ticketPath || id === claim.runId)) pids.add(entry.child.pid);
+    for (const item of Object.values(loadState(root).runs || {})) if (item.ticketPath === claim.ticketPath && ['running', 'retrying', 'cleaning'].includes(item.status) && item.pid) pids.add(item.pid);
+    return [...pids];
+  }
+  persistCleanupAttention(root, state, claim, runIdValue, error, claimKeyValue) {
+    const message = error instanceof Error ? error.message : String(error);
+    claim.integration = { ...(claim.integration || {}), cleanup: { ...(claim.integration?.cleanup || {}), phase: 'needs_attention', error: message, failedAt: new Date().toISOString() } };
+    claim.status = 'needs_attention'; claim.phase = claim.integration.phase === 'integrated' ? 'needs_attention' : 'needs_attention'; claim.error = message;
+    state.claims[claimKeyValue || claim.ticketPath] = claim; state.runs[runIdValue] = { ...(state.runs[runIdValue] || {}), ...claim }; saveState(root, state);
+    appendRun(root, { event: 'cleanup-needs-attention', runId: runIdValue, ticketId: claim.ticketId, error: message });
+  }
+  cleanupRun(runIdValue, { automatic = false } = {}) {
+    const id = validateRecoveryRunId(runIdValue);
+    const matches = []; for (const root of this.roots) { const state = loadState(root); const run = state.runs?.[id]; if (run) matches.push({ root, state, run, key: Object.keys(state.claims || {}).find((key) => state.claims[key]?.runId === id) }); }
+    if (matches.length !== 1) throw new Error(matches.length ? 'Pi run ID is ambiguous.' : 'Pi run was not found in a registered project root.');
+    const { root, state, run, key } = matches[0]; const claim = (key && state.claims[key]) || run;
+    if (!run.integration || run.integration.mode !== 'worktree' || !claim.integration || claim.integration.mode !== 'worktree') throw new Error('Cleanup is only available for worktree integrations.');
+    let ticket, workflow;
+    try { ticket = this.resolveTicket(claim.ticketPath); workflow = parseWorkflow(root); if (workflow.workspaceMode !== 'worktree') throw new Error('Worktree cleanup is not enabled.'); } catch (error) { this.persistCleanupAttention(root, state, claim, id, error, key); throw error; }
+    const expected = path.join(root, '.orchestration', 'workspaces', `${sanitizeTicketId(ticket.id)}-${ticketHash(ticket.filePath)}`); const expectedBranch = `constellation/${sanitizeTicketId(ticket.id)}-${ticketHash(ticket.filePath)}`;
+    try {
+      if (String(claim.integration.ownedWorkspace) !== String(expected)) throw new Error('Integration metadata ownedWorkspace does not match deterministic workspace.');
+      const expectedTicket = path.join(expected, path.relative(root, ticket.filePath));
+      if (String(claim.integration.sourceTicketPath) !== String(expectedTicket)) throw new Error('Integration metadata source ticket does not match deterministic ticket workspace.');
+      if (claim.integration.sourceBranch !== expectedBranch) throw new Error('Integration metadata source branch does not match deterministic ticket branch.');
+    } catch (error) { this.persistCleanupAttention(root, state, claim, id, error, key); throw error; }
+    const cleanup = claim.integration.cleanup || {};
+    const retryLive = [...this.retryTimers.values(), ...this.integrationRetryTimers.values()].some((item) => item.root === root && item.ticketPath === claim.ticketPath);
+    if (retryLive) { const error = new Error('An owned retry process is still running.'); this.persistCleanupAttention(root, state, claim, id, error, key); throw error; }
+    if (cleanup.phase === 'cleaned') return { runId: id, ok: true, cleanup: cleanup.phase, action: 'already-cleaned' };
+    const listed = worktreeEntries(root, this.execFile).some((item) => item.path === path.resolve(expected));
+    if (cleanup.phase === 'cleaning' && !listed && !fs.existsSync(expected)) { const next = { ...claim.integration, cleanup: { ...cleanup, phase: 'cleaned', cleanedAt: cleanup.cleanedAt || new Date().toISOString(), error: undefined } }; claim.integration = next; claim.status = 'completed'; claim.phase = 'integrated'; claim.error = undefined; state.claims[key] = claim; state.runs[id] = { ...run, ...claim }; saveState(root, state); return { runId: id, ok: true, cleanup: 'cleaned', action: 'recovered' }; }
+    if (!listed && !fs.existsSync(expected)) { const error = new Error('Owned workspace is missing before cleanup began; manual attention required.'); this.persistCleanupAttention(root, state, claim, id, error, key); throw error; }
+    const cleaning = { ...claim.integration, cleanup: { ...cleanup, phase: 'cleaning', startedAt: cleanup.startedAt || new Date().toISOString(), error: undefined } }; claim.integration = cleaning; state.claims[key] = claim; state.runs[id] = { ...run, ...claim }; saveState(root, state);
+    try { const result = cleanupWorktree({ metadata: cleaning, expectedWorkspace: expected, expectedBranch, liveProcessCheck: this.isProcessAlive, ownedPids: this.cleanupPids(root, claim), execFile: this.execFile }); claim.integration = { ...cleaning, cleanup: { ...cleaning.cleanup, ...result } }; claim.status = 'completed'; claim.phase = 'integrated'; claim.error = undefined; state.claims[key] = claim; state.runs[id] = { ...state.runs[id], ...claim }; saveState(root, state); appendRun(root, { event: 'cleaned', runId: id, ticketId: claim.ticketId }); return { runId: id, ok: true, cleanup: 'cleaned', action: 'removed' }; }
+    catch (error) { claim.integration = { ...cleaning, cleanup: { ...cleaning.cleanup, phase: 'needs_attention', error: error.message, failedAt: new Date().toISOString() } }; claim.status = 'needs_attention'; claim.phase = 'needs_attention'; claim.error = error.message; state.claims[key] = claim; state.runs[id] = { ...state.runs[id], ...claim }; saveState(root, state); throw error; }
+  }
+  hasLivePersistedWorker(root, ticketPath) {
+    const state = loadState(root);
+    for (const run of Object.values(state.runs || {})) {
+      if (run.ticketPath !== ticketPath || !['running', 'worker', 'reviewer'].includes(run.status) && !['worker', 'reviewer'].includes(run.phase)) continue;
+      if (!run.pid) continue;
+      try {
+        if (this.isProcessAlive(Number(run.pid))) return true;
+      } catch (error) {
+        throw new Error(`Refusing retry while persisted process liveness is unknown (PID ${run.pid}: ${error.code || error.message}).`);
+      }
+    }
+    return false;
+  }
+  retryReview(runIdValue) {
+    const id = validateRecoveryRunId(runIdValue); const matches = this.roots.map((root) => ({ root, state: loadState(root) })).flatMap(({ root, state }) => state.runs?.[id] ? [{ root, state, run: state.runs[id], key: Object.keys(state.claims || {}).find((key) => state.claims[key]?.runId === id) }] : []);
+    if (matches.length !== 1) throw new Error(matches.length ? 'Pi run ID is ambiguous.' : 'Pi run was not found in a registered project root.');
+    const { root, state, run } = matches[0]; const claim = run;
+    if (!claim?.integration || claim.integration.phase !== 'pending_review') throw new Error('Retry review is only allowed for a pending review run.');
+    const ticket = this.assertDeterministicIntegrationWorkspace(claim, root);
+    const workflow = parseWorkflow(root);
+    if (workflow.workspaceMode !== 'worktree' || claim.integration.mode !== 'worktree') throw new Error('Review retry requires a worktree integration.');
+    const expected = path.join(root, '.orchestration', 'workspaces', `${sanitizeTicketId(ticket.id)}-${ticketHash(ticket.filePath)}`);
+    const expectedTicket = path.join(expected, path.relative(root, ticket.filePath));
+    if (path.resolve(claim.integration.ownedWorkspace) !== path.resolve(expected) || path.resolve(claim.integration.sourceTicketPath || '') !== path.resolve(expectedTicket)) throw new Error('Review metadata no longer matches the deterministic workspace or source ticket.');
+    const current = preflight({ root, workspace: expected, sourceBranch: claim.integration.sourceBranch, ticketPath: expectedTicket, execFile: this.execFile });
+    if (current.sourceHead !== claim.integration.sourceHead || current.sourceBranch !== claim.integration.sourceBranch || current.destinationBranch !== claim.integration.destinationBranch || current.baseHead !== claim.integration.baseHead) throw new Error('Reviewed source or destination identity moved since review.');
+    if (this.hasLivePersistedWorker(root, claim.ticketPath)) throw new Error('A reviewer or worker for this ticket is already running.');
+    return this.startWorker(ticket, { workflow, reviewer: true, allowAnyState: true, integration: claim.integration });
+  }
+  retryIntegration(runIdValue) {
+    const id = validateRecoveryRunId(runIdValue); const matches = this.roots.map((root) => ({ root, state: loadState(root) })).flatMap(({ root, state }) => { const run = state.runs?.[id]; return run ? [{ root, state, run, key: Object.keys(state.claims || {}).find((key) => state.claims[key]?.runId === id) }] : []; });
+    if (matches.length !== 1) throw new Error(matches.length ? 'Pi run ID is ambiguous.' : 'Pi run was not found in a registered project root.'); const { root, state, run, key } = matches[0]; const claim = state.claims[key]; const phase = claim?.integration?.phase;
+    if (!claim || (!['integration_pending', 'integrating', 'completing'].includes(phase) && !(claim.phase === 'needs_attention' && ['integration_pending', 'integrating', 'completing'].includes(claim.integration?.phase)))) throw new Error('Retry integration is not allowed for this run (pending_review is never retryable).');
+    const ticket = this.assertDeterministicIntegrationWorkspace(claim, root);
+    const workflow = parseWorkflow(root);
+    if (workflow.workspaceMode !== 'worktree' || claim.integration.mode !== 'worktree') throw new Error('Integration retry requires a worktree integration.');
+    const expectedWorkspace = path.join(root, '.orchestration', 'workspaces', `${sanitizeTicketId(ticket.id)}-${ticketHash(ticket.filePath)}`);
+    const expectedTicket = path.join(expectedWorkspace, path.relative(root, ticket.filePath));
+    const expectedBranch = `constellation/${sanitizeTicketId(ticket.id)}-${ticketHash(ticket.filePath)}`;
+    if (path.resolve(claim.integration.ownedWorkspace) !== path.resolve(expectedWorkspace) || path.resolve(claim.integration.sourceTicketPath || '') !== path.resolve(expectedTicket)) throw new Error('Integration metadata no longer matches the deterministic workspace or source ticket.');
+    if (claim.integration.sourceBranch !== expectedBranch) throw new Error('Integration metadata source branch does not match the deterministic ticket branch.');
+    if (path.resolve(claim.integration.destinationRoot || '') !== path.resolve(root) || path.resolve(claim.integration.topLevel || '') !== path.resolve(root) || !claim.integration.destinationBranch) throw new Error('Integration metadata no longer matches the project root.');
+    try {
+      const current = preflight({ root, workspace: expectedWorkspace, sourceBranch: expectedBranch, ticketPath: expectedTicket, execFile: this.execFile });
+      if (current.destinationBranch !== claim.integration.destinationBranch) throw new Error('Integration metadata destination branch no longer matches the project branch.');
+      if (claim.phase === 'needs_attention') claim.phase = phase;
+      return this.attemptIntegration(root, key, claim, state);
+    } catch (error) {
+      const message = `Integration retry failed: ${error instanceof Error ? error.message : String(error)} Retry integration after resolving the issue.`;
+      const retryablePhase = ['integration_pending', 'integrating', 'completing'].includes(claim.integration?.phase) ? claim.integration.phase : phase;
+      claim.integration = { ...claim.integration, phase: retryablePhase, error: message };
+      claim.phase = 'needs_attention'; claim.status = 'needs_attention'; claim.error = message;
+      state.claims[key] = claim; state.runs[id] = { ...state.runs[id], ...claim }; saveState(root, state);
+      appendRun(root, { event: 'integration-needs-attention', runId: id, ticketId: claim.ticketId, phase: retryablePhase, error: message });
+      this.runtimeStatuses.set(claim.ticketPath, 'needs_attention');
+      throw error;
+    }
+  }
   scheduleIntegrationRetry(root, key, runIdValue) {
     const retryKey = `${path.resolve(root)}|${key}`; const previous = this.integrationRetryTimers.get(retryKey); if (previous) return;
     const attempts = (this.integrationRetryAttempts?.get(retryKey) || 0) + 1; this.integrationRetryAttempts ??= new Map(); this.integrationRetryAttempts.set(retryKey, attempts);
@@ -182,9 +291,10 @@ class PiMarkdownProvider {
   markIntegrationRetryExhausted(root, key, runIdValue) {
     const state = loadState(root); const claim = state.claims[key];
     if (!claim || claim.runId !== runIdValue) return;
-    const error = 'Integration retry limit exhausted; retry review.';
+    const error = 'Integration retry limit exhausted; retry integration.';
+    const integrationPhase = claim.integration?.phase;
     claim.phase = 'needs_attention'; claim.status = 'needs_attention'; claim.error = error;
-    if (claim.integration) claim.integration = { ...claim.integration, phase: 'needs_attention' };
+    if (claim.integration) claim.integration = { ...claim.integration, phase: integrationPhase };
     state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim, phase: 'needs_attention', status: 'needs_attention', error };
     saveState(root, state); appendRun(root, { event: 'needs_attention', runId: runIdValue, ticketId: claim.ticketId, error });
     this.runtimeStatuses.set(claim.ticketPath, 'needs_attention');
@@ -194,10 +304,12 @@ class PiMarkdownProvider {
     const result = integrateReviewed({ metadata: claim.integration, execFile: this.execFile, persist,
       prepare: () => ({ completionPaths: this.readyAncestorPaths(claim.ticketPath, claim.integration).map((item) => path.relative(root, item.filePath)) }),
       finalize: (integration) => this.completeIntegratedAncestors(root, claim.ticketPath, integration) });
-    claim.integration = result; claim.phase = 'integrated'; claim.status = 'completed'; state.claims[key] = claim; state.runs[claim.runId] = { ...state.runs[claim.runId], ...claim }; saveState(root, state);
+    const successfulIntegration = { ...result }; delete successfulIntegration.error;
+    claim.integration = { ...successfulIntegration, cleanup: { phase: 'pending', requestedAt: new Date().toISOString() } }; claim.phase = 'integrated'; claim.status = 'completed'; state.claims[key] = claim; state.runs[claim.runId] = { ...state.runs[claim.runId], ...claim }; saveState(root, state);
     const ticket = this.resolveTicket(claim.ticketPath); updateTicketAtomic(ticket.filePath, { state: 'done' }); this.runtimeStatuses.set(ticket.filePath, 'done');
     appendRun(root, { event: 'integrated', runId: claim.runId, ticketId: claim.ticketId, destinationHead: result.finalDestinationHead });
-    return result;
+    try { this.cleanupRun(claim.runId, { automatic: true }); } catch (error) { /* integration remains historical truth; cleanup is durable attention */ }
+    return loadState(root).claims[key].integration;
   }
   listTickets() {
     const tickets = [...new Set(this.roots.flatMap(walkTickets))].map((file) => parseTicket(file, fs.readFileSync(file, 'utf8')));
@@ -234,8 +346,10 @@ class PiMarkdownProvider {
       cwd: run.workspace || run.cwd, projectRoot: root, model: run.model, workspace: run.workspace, branch: run.branch,
       startedAt: run.startedAt, finishedAt: run.finishedAt, summary: run.summary, objective: run.objective,
       code: run.code, signal: run.signal, error: run.error, ticketPath: run.ticketPath, sessionDir: run.sessionDir,
-      integration: run.integration, integrationPhase: run.integration?.phase, mergeCommit: run.integration?.mergeCommit,
+      integration: run.integration, integrationPhase: run.integration?.phase, reviewResult: run.reviewResult || run.integration?.reviewResult,
+      cleanupPhase: run.integration?.cleanup?.phase, sourceHead: run.integration?.sourceHead, mergeCommit: run.integration?.mergeCommit,
       completionCommit: run.integration?.completionCommit, finalDestinationHead: run.integration?.finalDestinationHead,
+      integrationError: run.integration?.error, cleanupError: run.integration?.cleanup?.error,
     })).slice(-100);
   }
   snapshot() {
@@ -274,7 +388,7 @@ class PiMarkdownProvider {
   readRun(runIdValue) {
     const runId = String(runIdValue); for (const root of this.roots) { const state = loadState(root); const run = state.runs?.[runId]; if (!run) continue;
       let items = []; try { items = fs.readFileSync(projectStateFiles(root).runs, 'utf8').trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line)).filter((event) => event.runId === runId).slice(-200); } catch (error) { if (/symlink|outside project/i.test(error.message)) throw error; }
-      return { provider: 'pi', threadId: runId, status: run.status, phase: run.phase, integrationPhase: run.integration?.phase, mergeCommit: run.integration?.mergeCommit, completionCommit: run.integration?.completionCommit, finalDestinationHead: run.integration?.finalDestinationHead, model: run.model, workspace: run.workspace, branch: run.branch, summary: run.summary, error: run.error, items };
+      return { provider: 'pi', threadId: runId, status: run.status, phase: run.phase, integrationPhase: run.integration?.phase, reviewResult: run.reviewResult || run.integration?.reviewResult, cleanupPhase: run.integration?.cleanup?.phase, sourceHead: run.integration?.sourceHead, mergeCommit: run.integration?.mergeCommit, completionCommit: run.integration?.completionCommit, finalDestinationHead: run.integration?.finalDestinationHead, integrationError: run.integration?.error, cleanupError: run.integration?.cleanup?.error, model: run.model, workspace: run.workspace, branch: run.branch, summary: run.summary, error: run.error, items };
     } throw new Error('Pi run was not found in a registered project root.');
   }
   createTicket({ cwd, title, objective = '', acceptanceCriteria = [], parentId, blockedBy = [], id, state, internalValidated = false } = {}) {
@@ -332,7 +446,8 @@ class PiMarkdownProvider {
     if (!fs.existsSync(workspace)) this.execFile('git', ['-C', ticket.cwd, 'worktree', 'add', '-b', branch, workspace, 'HEAD'], { stdio: 'ignore' });
     const ticketPath = path.join(workspace, path.relative(ticket.cwd, ticket.filePath));
     const captured = preflight({ root: ticket.cwd, workspace, sourceBranch: branch, ticketPath, execFile: this.execFile });
-    if (reviewer && expectedIntegration && captured.sourceHead !== expectedIntegration.sourceHead) throw new Error('Reviewed source HEAD moved before reviewer launch.');
+    if (reviewer && !expectedIntegration) throw new Error('Reviewer launch requires expected integration metadata.');
+    if (reviewer && (!expectedIntegration.sourceHead || captured.sourceHead !== expectedIntegration.sourceHead)) throw new Error('Reviewed source HEAD moved before reviewer launch.');
     const preserved = expectedIntegration ? { ...expectedIntegration, sourceHead: reviewer ? expectedIntegration.sourceHead : captured.sourceHead, sourceTicketPath: ticketPath, phase: reviewer ? expectedIntegration.phase : 'correction' } : { ...captured, sourceBranch: branch, phase: 'dispatched' };
     return { cwd: workspace, branch, ticketPath, integration: preserved };
   }
@@ -405,15 +520,15 @@ class PiMarkdownProvider {
   }
   finishWorker(ticket, runIdValue, code, signal, reviewer) {
     const entry = this.children.get(runIdValue); if (!entry) return; this.children.delete(runIdValue); const escalation = this.escalationTimers.get(runIdValue); if (escalation) { clearTimeout(escalation); this.escalationTimers.delete(runIdValue); }
-    if (entry.interrupted) { const state = loadState(ticket.cwd); const claim = state.claims[claimKey(ticket)] || state.runs[runIdValue] || {}; claim.status = 'interrupted'; claim.finishedAt = new Date().toISOString(); claim.error = 'Run interrupted.'; state.claims[claimKey(ticket)] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'finished', runId: runIdValue, ticketId: ticket.id, phase: claim.phase, code, signal, status: 'interrupted', error: claim.error }); this.runtimeStatuses.set(ticket.filePath, 'waiting'); this.outputs.delete(runIdValue); return; }
+    if (entry.interrupted) { const state = loadState(ticket.cwd); const claim = state.claims[claimKey(ticket)] || state.runs[runIdValue] || {}; claim.status = 'interrupted'; claim.pid = undefined; claim.finishedAt = new Date().toISOString(); claim.error = 'Run interrupted.'; state.claims[claimKey(ticket)] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'finished', runId: runIdValue, ticketId: ticket.id, phase: claim.phase, code, signal, status: 'interrupted', error: claim.error }); this.runtimeStatuses.set(ticket.filePath, 'waiting'); this.outputs.delete(runIdValue); return; }
     const state = loadState(ticket.cwd); const key = claimKey(ticket); const claim = state.claims[key] || state.runs[runIdValue] || {}; const output = this.outputs.get(runIdValue) || '';
-    const passed = reviewer && /REVIEW:\s*PASS\b/i.test(output); const requested = reviewer && /REVIEW:\s*CHANGES_REQUESTED\b/i.test(output); const success = code === 0 && (!reviewer || (passed && !requested));
+    const passed = reviewer && /REVIEW:\s*PASS\b/i.test(output); const requested = reviewer && /REVIEW:\s*CHANGES_REQUESTED\b/i.test(output); const reviewStatus = reviewer ? (requested ? 'changes_requested' : (passed && code === 0 ? 'pass' : 'failed')) : undefined; const success = code === 0 && (!reviewer || (passed && !requested));
     const workflow = parseWorkflow(ticket.cwd); const attempts = state.attempts[key] || 1; const retryable = !success && attempts <= workflow.retryMax;
-    claim.status = success ? 'completed' : (retryable ? 'retrying' : 'blocked'); claim.finishedAt = new Date().toISOString(); claim.summary = output.slice(-2000); claim.error = success ? undefined : (reviewer && !passed ? 'Reviewer did not emit REVIEW: PASS.' : `Pi exited with code ${code}${signal ? ` (${signal})` : ''}`);
+    claim.status = success ? 'completed' : (retryable ? 'retrying' : 'blocked'); if (reviewer) claim.reviewResult = { status: reviewStatus, timestamp: new Date().toISOString(), sourceHead: claim.integration?.sourceHead }; if (reviewer && claim.integration) claim.integration = { ...claim.integration, reviewResult: claim.reviewResult }; claim.finishedAt = new Date().toISOString(); claim.summary = output.slice(-2000); claim.error = success ? undefined : (reviewer && !passed ? 'Reviewer did not emit REVIEW: PASS.' : `Pi exited with code ${code}${signal ? ` (${signal})` : ''}`);
     state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim, status: claim.status }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'finished', runId: runIdValue, ticketId: ticket.id, phase: claim.phase, code, signal, status: claim.status, summary: claim.summary, error: claim.error }); this.outputs.delete(runIdValue);
     if (success && !reviewer) {
       if (workflow.workspaceMode === 'worktree') {
-        try { claim.integration = captureReviewed({ metadata: claim.integration, ticketPath: claim.workspaceTicketPath, execFile: this.execFile }); claim.phase = 'pending_review'; claim.status = 'completed'; state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'captured', runId: runIdValue, ticketId: ticket.id, sourceHead: claim.integration.sourceHead }); }
+        try { claim.integration = captureReviewed({ metadata: claim.integration, ticketPath: claim.workspaceTicketPath, execFile: this.execFile }); claim.reviewResult = { status: 'pending', timestamp: new Date().toISOString(), sourceHead: claim.integration.sourceHead }; claim.integration = { ...claim.integration, reviewResult: claim.reviewResult }; claim.phase = 'pending_review'; claim.status = 'completed'; state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'captured', runId: runIdValue, ticketId: ticket.id, sourceHead: claim.integration.sourceHead }); }
         catch (error) { claim.status = 'needs_attention'; claim.phase = 'needs_attention'; claim.error = `Worktree capture failed: ${error.message}`; state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'needs_attention', runId: runIdValue, ticketId: ticket.id, error: claim.error }); this.runtimeStatuses.set(ticket.filePath, 'needs_attention'); return; }
       }
       if (workflow.autoReview) { if (workflow.workspaceMode !== 'worktree') updateTicketAtomic(ticket.filePath, { state: 'review' }); this.runtimeStatuses.set(ticket.filePath, 'review'); this.startWorker(ticket, { workflow, reviewer: true, allowAnyState: true, integration: claim.integration }); } else { if (workflow.workspaceMode !== 'worktree') updateTicketAtomic(ticket.filePath, { state: 'done' }); this.runtimeStatuses.set(ticket.filePath, 'done'); this.completeReadyAncestors(ticket); }
@@ -426,7 +541,7 @@ class PiMarkdownProvider {
           this.attemptIntegration(ticket.cwd, key, claim, state);
         }
         catch (error) {
-          if (error.code === 'INTEGRATION_LOCK_BUSY') { claim.integration = { ...claim.integration, phase: 'integration_pending' }; claim.phase = 'integration_pending'; claim.status = 'completed'; state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'integration-deferred', runId: runIdValue, ticketId: ticket.id, error: error.message }); this.scheduleIntegrationRetry(ticket.cwd, key, runIdValue); return; } claim.status = 'needs_attention'; claim.phase = 'needs_attention'; claim.error = `Worktree integration failed: ${error.message}`; state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'needs_attention', runId: runIdValue, ticketId: ticket.id, error: claim.error }); this.runtimeStatuses.set(ticket.filePath, 'needs_attention'); return; }
+          if (error.code === 'INTEGRATION_LOCK_BUSY') { claim.integration = { ...claim.integration, phase: 'integration_pending' }; claim.phase = 'integration_pending'; claim.status = 'completed'; state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'integration-deferred', runId: runIdValue, ticketId: ticket.id, error: error.message }); this.scheduleIntegrationRetry(ticket.cwd, key, runIdValue); return; } claim.integration = { ...claim.integration, error: error.message }; claim.status = 'needs_attention'; claim.phase = 'needs_attention'; claim.error = `Worktree integration failed: ${error.message}`; state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'needs_attention', runId: runIdValue, ticketId: ticket.id, error: claim.error }); this.runtimeStatuses.set(ticket.filePath, 'needs_attention'); return; }
       }
       if (workflow.workspaceMode !== 'worktree') updateTicketAtomic(ticket.filePath, { state: 'done' }); this.runtimeStatuses.set(ticket.filePath, 'done');
       // attemptIntegration performs merge, finalization, and parent completion
@@ -449,7 +564,7 @@ class PiMarkdownProvider {
         const latestState = loadState(latest.cwd);
         const claimState = latestState.claims[claimKey(latest)];
         if (claimState?.runId !== runIdValue || claimState.status !== 'retrying' || !['todo', 'idle', 'retrying'].includes(latest.state)) return;
-        this.startWorker(latest, { workflow, reviewer, allowAnyState: true });
+        this.startWorker(latest, { workflow, reviewer, allowAnyState: true, integration: reviewer ? claimState?.integration : undefined });
       }, delay);
       timer.unref?.();
       this.retryTimers.set(retryKey, { timer, root: path.resolve(ticket.cwd), ticketPath: ticket.filePath, runId: runIdValue });
@@ -511,8 +626,8 @@ class PiMarkdownProvider {
       if (root) {
         const state = loadState(root);
         const finishedAt = new Date().toISOString();
-        if (state.runs[text]) state.runs[text] = { ...state.runs[text], status: 'interrupted', finishedAt };
-        if (direct.ticket && state.claims[claimKey(direct.ticket)]) state.claims[claimKey(direct.ticket)] = { ...state.claims[claimKey(direct.ticket)], status: 'interrupted', finishedAt };
+        if (state.runs[text]) state.runs[text] = { ...state.runs[text], status: 'interrupted', pid: undefined, finishedAt };
+        if (direct.ticket && state.claims[claimKey(direct.ticket)]) state.claims[claimKey(direct.ticket)] = { ...state.claims[claimKey(direct.ticket)], status: 'interrupted', pid: undefined, finishedAt };
         saveState(root, state);
       }
       try {
@@ -565,8 +680,8 @@ class PiMarkdownProvider {
       if (root) {
         const state = loadState(root);
         if (state.runs[id]?.status === 'running' || (entry.ticket && state.claims[claimKey(entry.ticket)]?.status === 'running')) {
-          state.runs[id] = { ...state.runs[id], status: 'interrupted', finishedAt, error: 'Orchestration provider closed.' };
-          if (entry.ticket && state.claims[claimKey(entry.ticket)]) state.claims[claimKey(entry.ticket)] = { ...state.claims[claimKey(entry.ticket)], status: 'interrupted', finishedAt, error: 'Orchestration provider closed.' };
+          state.runs[id] = { ...state.runs[id], status: 'interrupted', pid: undefined, finishedAt, error: 'Orchestration provider closed.' };
+          if (entry.ticket && state.claims[claimKey(entry.ticket)]) state.claims[claimKey(entry.ticket)] = { ...state.claims[claimKey(entry.ticket)], status: 'interrupted', pid: undefined, finishedAt, error: 'Orchestration provider closed.' };
           saveState(root, state);
           appendRun(root, { event: 'finished', runId: id, phase: state.runs[id].phase, status: 'interrupted', error: state.runs[id].error });
         }

@@ -1,10 +1,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { parseTicket } = require('./tickets.cjs');
 
 const gitDefault = execFileSync;
 function runGit(root, args, execFile = gitDefault) { return String(execFile('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })).trim(); }
+function runGitRaw(root, args, execFile = gitDefault) { return String(execFile('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })); }
 function real(p) { return fs.realpathSync(path.resolve(String(p))); }
 function gitTop(root, execFile) { return real(runGit(root, ['rev-parse', '--show-toplevel'], execFile)); }
 function gitCommon(root, execFile) { const v = runGit(root, ['rev-parse', '--git-common-dir'], execFile); return real(path.isAbsolute(v) ? v : path.join(root, v)); }
@@ -39,8 +41,7 @@ function assertTrackedTicket(workspace, ticketPath, execFile) {
 function worktreeBinding(root, workspace, expectedBranch, execFile) {
   const target = path.resolve(workspace); let stat; try { stat = fs.lstatSync(target); } catch { throw new Error('Owned workspace does not exist.'); }
   if (stat.isSymbolicLink()) throw new Error('Owned workspace is a symlink.');
-  const lines = runGit(root, ['worktree', 'list', '--porcelain'], execFile).split(/\r?\n/); let found;
-  for (let i = 0; i < lines.length; i++) if (lines[i].startsWith('worktree ')) { const p = lines[i].slice(9); let b = ''; for (let j = i + 1; j < lines.length && lines[j]; j++) if (lines[j].startsWith('branch ')) b = lines[j].slice(7).replace(/^refs\/heads\//, ''); if (path.resolve(p) === target) found = { path: p, branch: b }; }
+  const found = parseWorktreePorcelain(runGitRaw(root, ['worktree', 'list', '--porcelain', '-z'], execFile)).find((entry) => entry.path === target);
   if (!found || found.branch !== expectedBranch) throw new Error('Owned workspace is not bound to the expected worktree and branch.');
   return found;
 }
@@ -59,7 +60,7 @@ function captureReviewed({ metadata, ticketPath, execFile = gitDefault } = {}) {
   if (!metadata || metadata.mode !== 'worktree') throw new Error('Worktree integration metadata is required.'); const current = preflight({ root: metadata.destinationRoot, workspace: metadata.ownedWorkspace, sourceBranch: metadata.sourceBranch, ticketPath, execFile });
   if (current.sourceHead === metadata.baseHead) throw new Error('Source branch has no new commit beyond the captured destination base.'); try { runGit(metadata.ownedWorkspace, ['merge-base', '--is-ancestor', metadata.baseHead, current.sourceHead], execFile); } catch { throw new Error('Source HEAD does not descend from the captured base.'); }
   const sourceTicket = parseTicket(ticketPath, fs.readFileSync(ticketPath, 'utf8')); if (!['done', 'completed'].includes(sourceTicket.state) || sourceTicket.acceptanceCriteria.some((item) => !item.completed)) throw new Error('Source ticket is not completed with every acceptance criterion checked.');
-  return { ...metadata, phase: 'pending_review', sourceHead: current.sourceHead, capturedAt: new Date().toISOString(), sourceTicketPath: ticketPath };
+  return { ...metadata, phase: 'pending_review', sourceHead: current.sourceHead, capturedAt: new Date().toISOString(), sourceTicketPath: ticketPath, sourceTicketHash: crypto.createHash('sha256').update(fs.readFileSync(ticketPath)).digest('hex') };
 }
 function lock(root, { isProcessAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (error) { if (error?.code === 'ESRCH') return false; throw error; } } } = {}) {
   const destinationRoot = real(root); const dir = path.join(destinationRoot, '.orchestration'); const file = path.join(dir, 'integration.lock');
@@ -71,6 +72,83 @@ function lock(root, { isProcessAlive = (pid) => { try { process.kill(pid, 0); re
   acquire(); return () => { try { const owner = JSON.parse(fs.readFileSync(file, 'utf8')); if (owner.token === token) fs.unlinkSync(file); } catch {} };
 }
 function exactParents(root, commit, execFile) { return runGit(root, ['rev-list', '--parents', '-n', '1', commit], execFile).split(/\s+/).slice(1); }
+function parseWorktreePorcelain(output) {
+  const entries = []; let block = [];
+  const flush = () => { const line = block.find((item) => item.startsWith('worktree ')); if (line) { const branchLine = block.find((item) => item.startsWith('branch ')); entries.push({ path: path.resolve(line.slice('worktree '.length)), branch: branchLine ? branchLine.slice('branch '.length).replace(/^refs\/heads\//, '') : '' }); } block = []; };
+  for (const token of String(output).split('\0')) { if (token === '') flush(); else block.push(token); }
+  flush(); return entries;
+}
+function worktreeEntries(root, execFile = gitDefault) { return parseWorktreePorcelain(runGitRaw(root, ['worktree', 'list', '--porcelain', '-z'], execFile)); }
+function strictStatus(root, execFile) {
+  const output = String(execFile('git', ['-C', root, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+  return output.split('\0').filter(Boolean);
+}
+function assertSafeWorkspacePath(workspace, root) {
+  const target = path.resolve(String(workspace)); const project = real(root); if (target === project || target.startsWith(`${project}${path.sep}`) === false) throw new Error('Owned workspace is not a safe project child.');
+  let current = path.parse(target).root; for (const component of target.slice(current.length).split(path.sep).filter(Boolean)) { current = path.join(current, component); const stat = fs.lstatSync(current); if (stat.isSymbolicLink()) throw new Error('Owned workspace path contains a symlink.'); }
+  const stat = fs.lstatSync(target); if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Owned workspace is not a real directory.'); return real(target);
+}
+function hasUnmergedEntries(root, execFile) {
+  try { return Boolean(runGitRaw(root, ['ls-files', '-u', '--'], execFile).trim()); } catch { return false; }
+}
+const inProgressGitPaths = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'BISECT_LOG', 'rebase-merge', 'rebase-apply', 'sequencer'];
+function assertNoInProgressGitOperation(root, execFile) {
+  for (const marker of inProgressGitPaths) {
+    let markerPath;
+    try { markerPath = runGit(root, ['rev-parse', '--git-path', marker], execFile); } catch { throw new Error(`Could not resolve Git operation state: ${marker}.`); }
+    const resolved = path.isAbsolute(markerPath) ? markerPath : path.resolve(root, markerPath);
+    if (fs.existsSync(resolved)) throw new Error(`Owned workspace has an in-progress Git operation (${marker}).`);
+  }
+}
+function verifyIntegrated(metadata, execFile) {
+  if (!metadata || metadata.phase !== 'integrated') throw new Error('Integration is not fully verified.');
+  const before = metadata.destinationHeadBeforeMerge || metadata.baseHead; const merge = metadata.mergeCommit; if (!before || !merge || !metadata.sourceHead) throw new Error('Recorded integration parents are incomplete.');
+  if (exactParents(metadata.destinationRoot, merge, execFile).join(' ') !== `${before} ${metadata.sourceHead}`) throw new Error('Recorded merge commit does not have the exact source and destination parents.');
+  if (metadata.completionCommit) {
+    const parents = exactParents(metadata.destinationRoot, metadata.completionCommit, execFile);
+    if (parents.length !== 1 || parents[0] !== merge) throw new Error('Recorded completion commit does not have the exact merge parent.');
+    if (metadata.completionPaths?.length) {
+      const changed = runGit(metadata.destinationRoot, ['diff-tree', '--no-commit-id', '--name-only', '-r', metadata.completionCommit], execFile).split(/\r?\n/).filter(Boolean).sort();
+      if (JSON.stringify(changed) !== JSON.stringify([...metadata.completionPaths].sort())) throw new Error('Recorded completion commit changed paths do not match integration metadata.');
+    }
+  }
+  return true;
+}
+function cleanupWorktree({ metadata, expectedWorkspace, expectedBranch, liveProcessCheck = () => false, ownedPids = [], execFile = gitDefault } = {}) {
+  if (!metadata?.destinationRoot) throw new Error('Malformed integration metadata; manual attention required.');
+  if (expectedWorkspace !== undefined && String(expectedWorkspace) !== String(metadata.ownedWorkspace)) throw new Error('Expected workspace does not equal persisted owned workspace.');
+  const release = lock(metadata.destinationRoot);
+  try {
+    verifyIntegrated(metadata, execFile); const workspace = assertSafeWorkspacePath(expectedWorkspace || metadata.ownedWorkspace, metadata.destinationRoot);
+    if (workspace !== path.resolve(expectedWorkspace || metadata.ownedWorkspace)) throw new Error('Owned workspace canonical path changed.');
+    if (workspace === real(metadata.destinationRoot)) throw new Error('Refusing to remove the project root.');
+    if (gitTop(workspace, execFile) !== workspace || gitCommon(workspace, execFile) !== gitCommon(metadata.destinationRoot, execFile)) throw new Error('Owned workspace belongs to a different Git repository.');
+    if (metadata.sourceTicketPath) {
+      const recordedTicket = path.resolve(metadata.sourceTicketPath);
+      const relativeTicket = path.relative(workspace, recordedTicket);
+      if (!relativeTicket || relativeTicket.startsWith('..') || path.isAbsolute(relativeTicket)) throw new Error('Recorded source ticket is outside the owned workspace.');
+      const ticketStat = fs.lstatSync(recordedTicket);
+      if (!ticketStat.isFile() || ticketStat.isSymbolicLink()) throw new Error('Recorded source ticket is not a regular file.');
+      if (metadata.relativeTicket) {
+        const expectedTicket = path.resolve(workspace, metadata.relativeTicket);
+        if (recordedTicket !== expectedTicket) throw new Error('Recorded source ticket path changed.');
+      }
+    }
+    if (metadata.sourceTicketHash) {
+      let sourceTicketBytes;
+      try { sourceTicketBytes = fs.readFileSync(metadata.sourceTicketPath); } catch { throw new Error('Recorded source ticket is missing.'); }
+      if (crypto.createHash('sha256').update(sourceTicketBytes).digest('hex') !== metadata.sourceTicketHash) throw new Error('Recorded source ticket bytes changed.');
+    }
+    const entries = worktreeEntries(metadata.destinationRoot, execFile); const binding = entries.find((entry) => entry.path === workspace); if (!binding || binding.branch !== expectedBranch || metadata.sourceBranch !== expectedBranch) throw new Error('Owned workspace is not bound to the expected branch.');
+    if (head(workspace, execFile) !== metadata.sourceHead) throw new Error('Owned workspace HEAD moved from the reviewed source HEAD.');
+    if (hasUnmergedEntries(workspace, execFile)) throw new Error('Owned workspace has unresolved or unmerged entries.');
+    assertNoInProgressGitOperation(workspace, execFile);
+    const dirty = strictStatus(workspace, execFile); if (dirty.length) throw new Error(`Owned workspace is not fully clean: ${dirty.join(', ')}`);
+    for (const pid of ownedPids) { if (pid && liveProcessCheck(Number(pid))) throw new Error(`Owned process ${pid} is still running.`); }
+    runGit(metadata.destinationRoot, ['worktree', 'remove', '--', workspace], execFile);
+    return { phase: 'cleaned', cleanedAt: new Date().toISOString() };
+  } finally { release(); }
+}
 function authorizeMovedDestination(root, base, current, records = [], execFile = gitDefault) { if (base === current) return true; let commits; try { commits = runGit(root, ['rev-list', '--first-parent', `${base}..${current}`], execFile).split(/\r?\n/).filter(Boolean); } catch { return false; } const allowed = new Set(records.flatMap((record) => [record.mergeCommit, record.completionCommit, record.finalDestinationHead].filter(Boolean))); return commits.length > 0 && commits.every((commit) => allowed.has(commit)); }
 function reconcileIntegration({ metadata, execFile = gitDefault } = {}) {
   if (!metadata?.destinationRoot || !metadata.sourceHead || !metadata.baseHead || !metadata.destinationBranch) throw new Error('Malformed integration metadata; manual attention required.');
@@ -110,4 +188,4 @@ function integrateReviewed({ metadata, execFile = gitDefault, persist, finalize,
     const finalHead = completion.finalDestinationHead || head(metadata.destinationRoot, execFile); const result = { ...working, ...completion, phase: 'integrated', mergeCommit, destinationHead: mergeCommit, finalDestinationHead: finalHead, integratedAt: new Date().toISOString() }; persist?.(result); Object.assign(metadata, result); return result;
   } finally { release(); }
 }
-module.exports = { runGit, status, assertClean, preflight, captureReviewed, reconcileIntegration, integrateReviewed, acquireIntegrationLock: lock, exactParents, authorizeMovedDestination };
+module.exports = { runGit, runGitRaw, status, assertClean, preflight, captureReviewed, reconcileIntegration, integrateReviewed, acquireIntegrationLock: lock, exactParents, authorizeMovedDestination, worktreeEntries, cleanupWorktree, verifyIntegrated, parseWorktreePorcelain, hasUnmergedEntries, assertNoInProgressGitOperation };

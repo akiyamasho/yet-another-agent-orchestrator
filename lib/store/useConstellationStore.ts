@@ -44,6 +44,9 @@ type Store = NormalizedState & {
   stopQueue: (root: string) => Promise<void>;
   dispatchNext: (root: string) => Promise<{ dispatched?: boolean; reason?: string; runId?: string }>;
   retryPiRun: (runId: string) => Promise<void>;
+  retryPiReview: (runId: string) => Promise<void>;
+  retryPiIntegration: (runId: string) => Promise<void>;
+  cleanupPiRun: (runId: string) => Promise<void>;
   interruptPiRun: (runId: string) => Promise<void>;
 };
 
@@ -239,6 +242,9 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
   stopQueue: async (root) => { const desktop = window.constellationDesktop; if (!desktop) throw new Error("Pi queue controls are available in the desktop app."); await desktop.pi.stopQueue(root); await get().syncFromSource(); },
   dispatchNext: async (root) => { const desktop = window.constellationDesktop; if (!desktop) throw new Error("Pi dispatch is available in the desktop app."); const result = await desktop.pi.dispatchNext(root); await get().syncFromSource(); return result && typeof result === "object" ? result as { dispatched?: boolean; reason?: string; runId?: string } : {}; },
   retryPiRun: async (runId) => { const desktop = window.constellationDesktop; if (!desktop) throw new Error("Pi run controls are available in the desktop app."); await desktop.pi.retry(runId); await get().syncFromSource(); },
+  retryPiReview: async (runId) => { const desktop = window.constellationDesktop; if (!desktop) throw new Error("Pi run controls are available in the desktop app."); await desktop.pi.retryReview(runId); await get().syncFromSource(); },
+  retryPiIntegration: async (runId) => { const desktop = window.constellationDesktop; if (!desktop) throw new Error("Pi run controls are available in the desktop app."); await desktop.pi.retryIntegration(runId); await get().syncFromSource(); },
+  cleanupPiRun: async (runId) => { const desktop = window.constellationDesktop; if (!desktop) throw new Error("Pi run controls are available in the desktop app."); await desktop.pi.cleanupRun(runId); await get().syncFromSource(); },
   interruptPiRun: async (runId) => { const desktop = window.constellationDesktop; if (!desktop) throw new Error("Pi run controls are available in the desktop app."); await desktop.pi.interrupt(runId); await get().syncFromSource(); },
   filteredThreads: () => {
     const { threads, query, selectedFolderId, statusFilter } = get();

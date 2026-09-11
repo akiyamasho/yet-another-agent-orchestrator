@@ -88,6 +88,9 @@ declare global {
         queueStatus: (root: string) => Promise<unknown>;
         dispatchNext: (root: string) => Promise<unknown>;
         retry: (filePath: string) => Promise<unknown>;
+        retryReview: (runId: string) => Promise<unknown>;
+        retryIntegration: (runId: string) => Promise<unknown>;
+        cleanupRun: (runId: string) => Promise<unknown>;
       };
       claude: {
         getSnapshot: () => Promise<Omit<ClaudeSnapshot, "provider"> & { connected: boolean; capabilities?: Record<string, boolean> }>;

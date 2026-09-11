@@ -86,14 +86,20 @@ test('readRun parses multiple JSONL events', () => {
   fs.mkdirSync(path.join(root, '.orchestration'), { recursive: true });
   const provider = new PiMarkdownProvider({ roots: [root] });
   const state = loadState(root);
-  state.runs['run-1'] = { runId: 'run-1', status: 'running', phase: 'worker', model: 'test', workspace: root };
+  state.runs['run-1'] = { runId: 'run-1', status: 'running', phase: 'worker', model: 'test', workspace: root, integration: { phase: 'pending_review', sourceHead: 'source-123', cleanup: { phase: 'pending', error: 'cleanup warning' }, error: 'integration warning' }, reviewResult: { status: 'pending', timestamp: '2025-01-01T00:00:00.000Z', sourceHead: 'source-123' } };
   saveState(root, state);
   fs.writeFileSync(path.join(root, '.orchestration', 'runs.jsonl'), [
     { runId: 'run-1', event: 'started', phase: 'worker' },
     { runId: 'other', event: 'output' },
     { runId: 'run-1', event: 'output', output: 'second event' },
   ].map((event) => JSON.stringify(event)).join('\n') + '\n');
-  assert.deepEqual(provider.readRun('run-1').items.map((item) => item.event), ['started', 'output']);
+  const read = provider.readRun('run-1');
+  assert.deepEqual(read.items.map((item) => item.event), ['started', 'output']);
+  assert.equal(read.integrationPhase, 'pending_review');
+  assert.equal(read.reviewResult.status, 'pending');
+  assert.equal(read.sourceHead, 'source-123');
+  assert.equal(read.integrationError, 'integration warning');
+  assert.equal(read.cleanupError, 'cleanup warning');
   provider.close();
 });
 
