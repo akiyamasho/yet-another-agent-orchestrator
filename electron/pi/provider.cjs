@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const { spawn: spawnProcess, execFileSync } = require('node:child_process');
 const { parseTicket, updateTicketAtomic } = require('./tickets.cjs');
 const { parseWorkflow, PI_WORKFLOW_MODELS } = require('./workflow.cjs');
+const { preflight, captureReviewed, reconcileIntegration, integrateReviewed } = require('./integration.cjs');
 const { loadState, saveState, appendRun, reconcileState, safeProjectPath, projectStateFiles } = require('./state.cjs');
 
 function walkTickets(root) {
@@ -84,7 +85,7 @@ function assertPiWorkflowModels(workflow) {
 }
 
 class PiMarkdownProvider {
-  constructor({ roots = [], spawn = spawnProcess, execFile = execFileSync } = {}) {
+  constructor({ roots = [], spawn = spawnProcess, execFile = execFileSync, integrationRetryMax = 5, integrationRetryBaseDelay = 100 } = {}) {
     this.roots = [...new Set(roots.map(canonicalRoot))];
     this.spawn = spawn;
     this.execFile = execFile;
@@ -93,6 +94,9 @@ class PiMarkdownProvider {
     this.queueTimers = new Map();
     this.runtimeStatuses = new Map();
     this.retryTimers = new Map();
+    this.integrationRetryTimers = new Map();
+    this.integrationRetryMax = integrationRetryMax;
+    this.integrationRetryBaseDelay = integrationRetryBaseDelay;
     this.escalationTimers = new Map();
     this.reconcile();
     for (const root of this.roots) if (loadState(root).scheduler?.enabled) this.startQueue(root);
@@ -103,10 +107,10 @@ class PiMarkdownProvider {
       if (next.has(root)) continue;
       this.stopQueueTimer(root);
       for (const [runIdValue, entry] of this.children) if ((entry.root || entry.ticket?.cwd) === root) void this.interrupt(runIdValue);
-      for (const [key, pending] of this.retryTimers) {
+      for (const [key, pending] of [...this.retryTimers, ...this.integrationRetryTimers]) {
         if (pending.root !== root) continue;
         clearTimeout(pending.timer);
-        this.retryTimers.delete(key);
+        this.retryTimers.delete(key); this.integrationRetryTimers.delete(key); this.integrationRetryAttempts?.delete(key);
         this.markPendingRetryInterrupted(pending);
       }
       for (const file of [...this.runtimeStatuses.keys()]) if (file.startsWith(`${root}${path.sep}`)) this.runtimeStatuses.delete(file);
@@ -119,8 +123,81 @@ class PiMarkdownProvider {
   setRoots(nextRoots = []) { return this.updateRoots(nextRoots); }
   reconcile() {
     const live = new Set([...this.children.values()].map((entry) => entry.child.pid));
-    const liveRetries = new Set([...this.retryTimers.values()].map((pending) => pending.runId));
-    for (const root of this.roots) reconcileState(root, loadState(root), live, liveRetries);
+    const liveRetries = new Set([...this.retryTimers.values(), ...this.integrationRetryTimers.values()].map((pending) => pending.runId));
+    for (const root of this.roots) {
+      const state = reconcileState(root, loadState(root), live, liveRetries);
+      for (const [key, claim] of Object.entries(state.claims || {})) {
+        if (!claim.integration || !['pending_review', 'integration_pending', 'integrating', 'completing', 'integrated'].includes(claim.integration.phase)) continue;
+        try {
+          this.assertDeterministicIntegrationWorkspace(claim, root);
+          const wasCompleting = claim.integration.phase === 'completing';
+          // A pending review has no durable reviewer ownership after restart.
+          // Never guess that it is safe to relaunch or integrate it.
+          if (claim.integration.phase === 'pending_review') {
+            claim.phase = 'needs_attention'; claim.status = 'needs_attention';
+            claim.error = 'Review interrupted; retry review.';
+            claim.integration = { ...claim.integration, phase: 'needs_attention' };
+            state.runs[claim.runId] = { ...state.runs[claim.runId], ...claim };
+            appendRun(root, { event: 'needs_attention', runId: claim.runId, ticketId: claim.ticketId, error: claim.error });
+            this.runtimeStatuses.set(claim.ticketPath, 'needs_attention');
+            continue;
+          }
+          // Integrated claims are historical records. Reconciliation must never
+          // re-finalize them when a later integration has moved HEAD.
+          if (claim.integration.phase === 'integrated') continue;
+          const result = reconcileIntegration({ metadata: claim.integration, execFile: this.execFile });
+          claim.integration = result;
+          if (['integration_pending', 'integrating', 'completing'].includes(result.phase)) {
+            this.attemptIntegration(root, key, claim, state, true);
+          } else {
+            claim.phase = result.phase; claim.status = result.phase === 'integrated' ? 'completed' : claim.status;
+            state.runs[claim.runId] = { ...state.runs[claim.runId], ...claim };
+            if (result.phase === 'integrated') { const ticket = this.resolveTicket(claim.ticketPath); updateTicketAtomic(claim.ticketPath, { state: 'done' }); if (!wasCompleting) this.completeReadyAncestors(ticket, claim.integration.mode === 'worktree'); }
+          }
+        } catch (error) {
+          if (error.code === 'INTEGRATION_LOCK_BUSY') { appendRun(root, { event: 'integration-deferred', runId: claim.runId, ticketId: claim.ticketId, error: error.message }); if (this.scheduleIntegrationRetry(root, key, claim.runId)) { const latest = loadState(root); state.claims = latest.claims; state.runs = latest.runs; } continue; }
+          claim.phase = 'needs_attention'; claim.status = 'needs_attention'; claim.error = `Restart reconciliation refused integration: ${error.message}`; state.runs[claim.runId] = { ...state.runs[claim.runId], ...claim }; appendRun(root, { event: 'needs_attention', runId: claim.runId, ticketId: claim.ticketId, error: claim.error });
+        }
+      }
+      saveState(root, state);
+    }
+  }
+  assertDeterministicIntegrationWorkspace(claim, root) {
+    const ticket = this.resolveTicket(claim.ticketPath);
+    const workflow = parseWorkflow(root);
+    if (workflow.workspaceMode !== 'worktree') return ticket;
+    const expected = path.join(root, '.orchestration', 'workspaces', `${sanitizeTicketId(ticket.id)}-${ticketHash(ticket.filePath)}`);
+    if (path.resolve(claim.integration.ownedWorkspace) !== path.resolve(expected)) throw new Error('Integration metadata points outside the deterministic ticket workspace.');
+    const expectedTicket = path.join(expected, path.relative(root, ticket.filePath));
+    if (path.resolve(claim.integration.sourceTicketPath || expectedTicket) !== path.resolve(expectedTicket)) throw new Error('Integration metadata points to a different ticket workspace.');
+    return ticket;
+  }
+  scheduleIntegrationRetry(root, key, runIdValue) {
+    const retryKey = `${path.resolve(root)}|${key}`; const previous = this.integrationRetryTimers.get(retryKey); if (previous) return;
+    const attempts = (this.integrationRetryAttempts?.get(retryKey) || 0) + 1; this.integrationRetryAttempts ??= new Map(); this.integrationRetryAttempts.set(retryKey, attempts);
+    if (attempts > this.integrationRetryMax) { this.integrationRetryAttempts.delete(retryKey); this.markIntegrationRetryExhausted(root, key, runIdValue); return true; }
+    const timer = setTimeout(() => { this.integrationRetryTimers.delete(retryKey); if (this.roots.includes(path.resolve(root))) this.reconcile(); }, Math.min(1000, this.integrationRetryBaseDelay * 2 ** (attempts - 1)));
+    timer.unref?.(); this.integrationRetryTimers.set(retryKey, { timer, root: path.resolve(root), ticketPath: key, runId: runIdValue }); return false;
+  }
+  markIntegrationRetryExhausted(root, key, runIdValue) {
+    const state = loadState(root); const claim = state.claims[key];
+    if (!claim || claim.runId !== runIdValue) return;
+    const error = 'Integration retry limit exhausted; retry review.';
+    claim.phase = 'needs_attention'; claim.status = 'needs_attention'; claim.error = error;
+    if (claim.integration) claim.integration = { ...claim.integration, phase: 'needs_attention' };
+    state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim, phase: 'needs_attention', status: 'needs_attention', error };
+    saveState(root, state); appendRun(root, { event: 'needs_attention', runId: runIdValue, ticketId: claim.ticketId, error });
+    this.runtimeStatuses.set(claim.ticketPath, 'needs_attention');
+  }
+  attemptIntegration(root, key, claim, state, restart = false) {
+    const persist = (integration) => { claim.integration = integration; claim.phase = integration.phase; claim.status = integration.phase === 'integrated' ? 'completed' : 'completed'; state.claims[key] = claim; state.runs[claim.runId] = { ...state.runs[claim.runId], ...claim }; saveState(root, state); appendRun(root, { event: integration.phase, runId: claim.runId, ticketId: claim.ticketId, destinationHeadBeforeMerge: integration.destinationHeadBeforeMerge }); };
+    const result = integrateReviewed({ metadata: claim.integration, execFile: this.execFile, persist,
+      prepare: () => ({ completionPaths: this.readyAncestorPaths(claim.ticketPath, claim.integration).map((item) => path.relative(root, item.filePath)) }),
+      finalize: (integration) => this.completeIntegratedAncestors(root, claim.ticketPath, integration) });
+    claim.integration = result; claim.phase = 'integrated'; claim.status = 'completed'; state.claims[key] = claim; state.runs[claim.runId] = { ...state.runs[claim.runId], ...claim }; saveState(root, state);
+    const ticket = this.resolveTicket(claim.ticketPath); updateTicketAtomic(ticket.filePath, { state: 'done' }); this.runtimeStatuses.set(ticket.filePath, 'done');
+    appendRun(root, { event: 'integrated', runId: claim.runId, ticketId: claim.ticketId, destinationHead: result.finalDestinationHead });
+    return result;
   }
   listTickets() {
     const tickets = [...new Set(this.roots.flatMap(walkTickets))].map((file) => parseTicket(file, fs.readFileSync(file, 'utf8')));
@@ -143,7 +220,11 @@ class PiMarkdownProvider {
       const issue = duplicate ? `Duplicate ticket ID: ${ticket.id}` : missingParent ? `Missing parent ticket: ${missingParent}` : missingBlocker ? `Missing blocker ticket: ${missingBlocker}` : undefined;
       if (issue) return { ...ticket, status: 'needs_attention', state: 'needs_attention', duplicateId: duplicate, issue };
       const status = this.runtimeStatuses.get(ticket.filePath);
-      return status ? { ...ticket, status, state: status } : ticket;
+      const persisted = loadState(ticket.cwd).claims?.[claimKey(ticket)]?.status;
+      const persistedClaim = loadState(ticket.cwd).claims?.[claimKey(ticket)];
+      const attention = persisted === 'needs_attention' ? 'needs_attention' : undefined;
+      const review = persistedClaim && ['pending_review', 'integration_pending', 'integrating', 'completing'].includes(persistedClaim.integration?.phase || persistedClaim.phase) ? 'review' : undefined;
+      return status ? { ...ticket, status, state: status } : attention ? { ...ticket, status: attention, state: attention, issue: persistedClaim.error } : review ? { ...ticket, status: review, state: review } : ticket;
     });
   }
   runSnapshot(root) {
@@ -153,6 +234,8 @@ class PiMarkdownProvider {
       cwd: run.workspace || run.cwd, projectRoot: root, model: run.model, workspace: run.workspace, branch: run.branch,
       startedAt: run.startedAt, finishedAt: run.finishedAt, summary: run.summary, objective: run.objective,
       code: run.code, signal: run.signal, error: run.error, ticketPath: run.ticketPath, sessionDir: run.sessionDir,
+      integration: run.integration, integrationPhase: run.integration?.phase, mergeCommit: run.integration?.mergeCommit,
+      completionCommit: run.integration?.completionCommit, finalDestinationHead: run.integration?.finalDestinationHead,
     })).slice(-100);
   }
   snapshot() {
@@ -191,7 +274,7 @@ class PiMarkdownProvider {
   readRun(runIdValue) {
     const runId = String(runIdValue); for (const root of this.roots) { const state = loadState(root); const run = state.runs?.[runId]; if (!run) continue;
       let items = []; try { items = fs.readFileSync(projectStateFiles(root).runs, 'utf8').trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line)).filter((event) => event.runId === runId).slice(-200); } catch (error) { if (/symlink|outside project/i.test(error.message)) throw error; }
-      return { provider: 'pi', threadId: runId, status: run.status, phase: run.phase, model: run.model, workspace: run.workspace, branch: run.branch, summary: run.summary, error: run.error, items };
+      return { provider: 'pi', threadId: runId, status: run.status, phase: run.phase, integrationPhase: run.integration?.phase, mergeCommit: run.integration?.mergeCommit, completionCommit: run.integration?.completionCommit, finalDestinationHead: run.integration?.finalDestinationHead, model: run.model, workspace: run.workspace, branch: run.branch, summary: run.summary, error: run.error, items };
     } throw new Error('Pi run was not found in a registered project root.');
   }
   createTicket({ cwd, title, objective = '', acceptanceCriteria = [], parentId, blockedBy = [], id, state, internalValidated = false } = {}) {
@@ -230,33 +313,30 @@ class PiMarkdownProvider {
   eligible(root) {
     const tickets = this.listTickets().filter((ticket) => ticket.cwd === path.resolve(root));
     const byId = new Map(); const duplicateIds = new Set(); tickets.forEach((ticket) => { const id = ticket.id.toLowerCase(); if (byId.has(id)) duplicateIds.add(id); else byId.set(id, ticket); }); const state = loadState(root);
-    return tickets.find((ticket) => !ticket.duplicateId && !duplicateIds.has(ticket.id.toLowerCase()) && !ticket.issue && ['todo', 'idle'].includes(ticket.state) && !state.claims[claimKey(ticket)]?.status?.match(/running|claimed|retrying/) && ticket.blockedBy.every((id) => byId.get(String(id).toLowerCase())?.state === 'done' || byId.get(String(id).toLowerCase())?.state === 'completed'));
+    return tickets.find((ticket) => !ticket.duplicateId && !duplicateIds.has(ticket.id.toLowerCase()) && !ticket.issue && ['todo', 'idle'].includes(ticket.state) && !state.claims[claimKey(ticket)]?.status?.match(/running|claimed|retrying|needs_attention/) && !['pending_review', 'integration_pending', 'integrating', 'completing'].includes(state.claims[claimKey(ticket)]?.phase) && ticket.blockedBy.every((id) => byId.get(String(id).toLowerCase())?.state === 'done' || byId.get(String(id).toLowerCase())?.state === 'completed'));
   }
   dispatch(value, options = {}) { return this.startWorker(this.resolveTicket(value), options); }
-  workspaceFor(ticket, workflow) {
-    if (workflow.workspaceMode !== 'worktree') return { cwd: ticket.cwd, branch: undefined };
+  workspaceFor(ticket, workflow, expectedIntegration, reviewer = false) {
+    if (workflow.workspaceMode !== 'worktree') return { cwd: ticket.cwd, branch: undefined, ticketPath: ticket.filePath };
     const workspace = path.join(ticket.cwd, '.orchestration', 'workspaces', `${sanitizeTicketId(ticket.id)}-${ticketHash(ticket.filePath)}`);
     const branch = `constellation/${sanitizeTicketId(ticket.id)}-${ticketHash(ticket.filePath)}`;
-    try {
-      this.execFile('git', ['-C', ticket.cwd, 'rev-parse', '--show-toplevel'], { stdio: 'ignore' });
-      const workspaceRoot = path.dirname(workspace);
-      safeProjectPath(ticket.cwd, '.orchestration', 'workspaces');
-      safeProjectPath(ticket.cwd, '.orchestration', 'workspaces', path.basename(workspace));
-      fs.mkdirSync(workspaceRoot, { recursive: true });
-      if (fs.existsSync(workspace) && fs.lstatSync(workspace).isSymbolicLink()) throw new Error('Refusing symlinked orchestration workspace.');
-      if (!safeChildPath(ticket.cwd, path.dirname(workspace))) throw new Error('Workspace is outside project root.');
-      if (!fs.existsSync(workspace)) {
-        try { this.execFile('git', ['-C', ticket.cwd, 'worktree', 'add', '-b', branch, workspace, 'HEAD'], { stdio: 'ignore' }); }
-        catch { this.execFile('git', ['-C', ticket.cwd, 'worktree', 'add', workspace, branch], { stdio: 'ignore' }); }
-      }
-      return { cwd: workspace, branch };
-    } catch (error) {
-      if (/symlinked|outside project root/.test(error.message)) throw error;
-      appendRun(ticket.cwd, { event: 'workspace-fallback', ticketId: ticket.id, error: `Could not create worktree; using project root. Check git status and permissions: ${error.message}` });
-      return { cwd: ticket.cwd, branch: undefined, error: error.message };
-    }
+    const workspaceRoot = path.dirname(workspace);
+    safeProjectPath(ticket.cwd, '.orchestration', 'workspaces');
+    safeProjectPath(ticket.cwd, '.orchestration', 'workspaces', path.basename(workspace));
+    fs.mkdirSync(workspaceRoot, { recursive: true });
+    if (fs.existsSync(workspace) && fs.lstatSync(workspace).isSymbolicLink()) throw new Error('Refusing symlinked orchestration workspace.');
+    if (!workflow.autoReview) throw new Error('Worktree mode requires autoReview=true; unreviewed output is never integrated.');
+    if (!safeChildPath(ticket.cwd, path.dirname(workspace))) throw new Error('Workspace is outside project root.');
+    // Preflight the registered destination before creating a child or worktree.
+    const destination = preflight({ root: ticket.cwd, workspace: ticket.cwd, ticketPath: ticket.filePath, execFile: this.execFile });
+    if (!fs.existsSync(workspace)) this.execFile('git', ['-C', ticket.cwd, 'worktree', 'add', '-b', branch, workspace, 'HEAD'], { stdio: 'ignore' });
+    const ticketPath = path.join(workspace, path.relative(ticket.cwd, ticket.filePath));
+    const captured = preflight({ root: ticket.cwd, workspace, sourceBranch: branch, ticketPath, execFile: this.execFile });
+    if (reviewer && expectedIntegration && captured.sourceHead !== expectedIntegration.sourceHead) throw new Error('Reviewed source HEAD moved before reviewer launch.');
+    const preserved = expectedIntegration ? { ...expectedIntegration, sourceHead: reviewer ? expectedIntegration.sourceHead : captured.sourceHead, sourceTicketPath: ticketPath, phase: reviewer ? expectedIntegration.phase : 'correction' } : { ...captured, sourceBranch: branch, phase: 'dispatched' };
+    return { cwd: workspace, branch, ticketPath, integration: preserved };
   }
-  startWorker(ticket, { phase = 'worker', workflow = parseWorkflow(ticket.cwd), reviewer = false, allowAnyState = false, correctionFeedback = '' } = {}) {
+  startWorker(ticket, { phase = 'worker', workflow = parseWorkflow(ticket.cwd), reviewer = false, allowAnyState = false, correctionFeedback = '', integration } = {}) {
     assertPiWorkflowModels(workflow);
     if (!this.roots.includes(path.resolve(ticket.cwd))) throw new Error('Ticket is not from a registered project root.');
     const current = this.listTickets().find((item) => item.filePath === ticket.filePath);
@@ -267,9 +347,21 @@ class PiMarkdownProvider {
     const rootState = loadState(ticket.cwd); const active = Object.values(rootState.claims || {}).filter((claim) => claim.status === 'running');
     if (active.length >= Math.min(3, workflow.maxConcurrent)) return { dispatched: false, reason: 'concurrency-cap', id: ticket.id };
     if ([...this.children.values()].some((entry) => entry.ticket?.filePath === ticket.filePath)) return { dispatched: false, running: true, id: ticket.id };
-    const run = runId('pi', ticket.cwd); const workspace = this.workspaceFor(ticket, workflow);
+    const run = runId('pi', ticket.cwd);
+    let workspace;
+    try { workspace = this.workspaceFor(ticket, workflow, integration, reviewer); }
+    catch (error) {
+      if (workflow.workspaceMode === 'worktree') {
+        const state = loadState(ticket.cwd); const now = new Date().toISOString();
+        const attention = { runId: run, ticketId: ticket.id, ticketPath: ticket.filePath, phase: 'needs_attention', status: 'needs_attention', mode: 'worktree', error: `Worktree dispatch refused: ${error.message}`, startedAt: now, finishedAt: now };
+        state.claims[claimKey(ticket)] = attention; state.runs[run] = attention; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'needs_attention', runId: run, ticketId: ticket.id, phase: 'dispatch', error: attention.error });
+        this.runtimeStatuses.set(ticket.filePath, 'needs_attention');
+      }
+      throw error;
+    }
+    const ticketPath = workspace.ticketPath;
     const tools = reviewer ? 'read,bash,grep,find,ls' : 'read,bash,edit,write,grep,find,ls';
-    const prompt = reviewer ? `Review ticket ${ticket.id} read-only. Inspect changes and acceptance checklist. End with exactly REVIEW: PASS or REVIEW: CHANGES_REQUESTED.` : `Work on ticket ${ticket.id} at ${ticket.filePath}.\n\n${ticket.title}\n${ticket.objective}\n\nAcceptance checklist:\n${ticket.acceptanceCriteria.map((x) => `- [${x.completed ? 'x' : ' '}] ${x.text}`).join('\n')}\n\nRepository WORKFLOW instructions:\n${workflow.instructions}\n\nUse normal project files only; update/check off the source ticket at ${ticket.filePath}, and finish with a concise handoff. Do not spawn recursive subagents.`;
+    const prompt = reviewer ? `Review ticket ${ticket.id} read-only at exact source HEAD ${workspace.integration?.sourceHead || 'captured source HEAD'}. Inspect only that checkout and its acceptance checklist. End with exactly REVIEW: PASS or REVIEW: CHANGES_REQUESTED.` : `Work on ticket ${ticket.id} at ${ticketPath}.\n\n${ticket.title}\n${ticket.objective}\n\nAcceptance checklist:\n${ticket.acceptanceCriteria.map((x) => `- [${x.completed ? 'x' : ' '}] ${x.text}`).join('\n')}\n\nRepository WORKFLOW instructions:\n${workflow.instructions}\n\nUse normal project files only; update/check off the source ticket at ${ticketPath}, and finish with a concise handoff. In worktree mode, commit all intended changes and set the ticket to done/completed with every acceptance criterion checked, leaving the worktree clean. Do not spawn recursive subagents.`;
     const model = reviewer ? workflow.reviewerModel : workflow.workerModel;
     const sessionDir = path.join(ticket.cwd, '.orchestration', 'sessions', `${sanitizeTicketId(ticket.id)}-${ticketHash(ticket.filePath)}`, reviewer ? 'reviewer' : 'worker');
     safeProjectPath(ticket.cwd, '.orchestration', 'sessions', path.basename(path.dirname(sessionDir)), path.basename(sessionDir));
@@ -278,28 +370,38 @@ class PiMarkdownProvider {
     if (fs.existsSync(sessionDir) && fs.readdirSync(sessionDir).some((name) => name.endsWith('.jsonl') && fs.lstatSync(path.join(sessionDir, name)).isFile())) args.push('--continue');
     args.push('-p', prompt);
     const child = this.spawn('pi', args, { cwd: workspace.cwd, env: piChildEnvironment(), stdio: ['ignore', 'pipe', 'pipe'] });
-    const claimKeyValue = claimKey(ticket); const now = new Date().toISOString(); const claim = { runId: run, ticketId: ticket.id, ticketPath: ticket.filePath, parentTicketId: ticket.parentId || undefined, phase: reviewer ? 'reviewer' : phase, pid: child.pid, model, workspace: workspace.cwd, branch: workspace.branch, sessionDir, status: 'running', startedAt: now };
+    const claimKeyValue = claimKey(ticket); const now = new Date().toISOString(); const claim = { runId: run, ticketId: ticket.id, ticketPath: ticket.filePath, workspaceTicketPath: ticketPath, parentTicketId: ticket.parentId || undefined, phase: reviewer ? 'reviewer' : phase, pid: child.pid, model, workspace: workspace.cwd, branch: workspace.branch, integration: workspace.integration, sessionDir, status: 'running', startedAt: now };
     rootState.claims[claimKeyValue] = claim; rootState.runs[run] = claim; rootState.attempts[claimKeyValue] = (rootState.attempts[claimKeyValue] || 0) + 1; saveState(ticket.cwd, rootState);
     this.children.set(run, { child, ticket, reviewer }); this.runtimeStatuses.set(ticket.filePath, reviewer ? 'reviewing' : 'running'); this.outputs.set(run, ''); appendRun(ticket.cwd, { event: 'started', runId: run, ticketId: ticket.id, phase: claim.phase, pid: child.pid, model, workspace: workspace.cwd, branch: workspace.branch });
     const output = (chunk) => { const text = String(chunk); this.outputs.set(run, `${this.outputs.get(run)}${text}`.slice(-30000)); appendRun(ticket.cwd, { event: 'output', runId: run, ticketId: ticket.id, phase: claim.phase, output: text.slice(-10000) }); };
     child.stdout?.on('data', output); child.stderr?.on('data', output); child.once('close', (code, signal) => this.finishWorker(ticket, run, code, signal, reviewer));
     return { dispatched: true, id: ticket.id, runId: run, filePath: ticket.filePath, pid: child.pid, phase: claim.phase };
   }
-  completeReadyAncestors(ticket) {
-    let parentId = ticket.parentId;
-    while (parentId) {
-      const projectTickets = this.listTickets().filter((item) => item.cwd === ticket.cwd);
-      const matches = projectTickets.filter((item) => item.id.toLowerCase() === String(parentId).toLowerCase());
-      if (matches.length !== 1) return;
-      const parent = matches[0];
-      const children = projectTickets.filter((item) => String(item.parentId || '').toLowerCase() === parent.id.toLowerCase());
-      if (!children.length || children.some((item) => !['done', 'completed'].includes(item.state))) return;
-      const criteria = parent.acceptanceCriteria.map((item) => ({ text: item.text, completed: true }));
-      updateTicketAtomic(parent.filePath, { state: 'done', acceptanceCriteria: criteria });
-      this.runtimeStatuses.set(parent.filePath, 'done');
-      appendRun(ticket.cwd, { event: 'parent-completed', ticketId: parent.id, triggerTicketId: ticket.id });
-      parentId = parent.parentId;
+  readyAncestorPaths(ticketPath, currentIntegration, selected = new Set()) {
+    const ticket = this.resolveTicket(ticketPath); const projectTickets = this.listTickets().filter((item) => item.cwd === ticket.cwd); const state = loadState(ticket.cwd); const requireIntegration = parseWorkflow(ticket.cwd).workspaceMode === 'worktree'; const ready = []; let parentId = ticket.parentId;
+    while (parentId) { const matches = projectTickets.filter((item) => item.id.toLowerCase() === String(parentId).toLowerCase()); if (matches.length !== 1) break; const parent = matches[0]; const children = projectTickets.filter((item) => String(item.parentId || '').toLowerCase() === parent.id.toLowerCase());
+      if (!children.length || children.some((item) => !['done', 'completed'].includes(item.state) && !(item.filePath === ticket.filePath && currentIntegration)) || children.some((item) => { const integration = state.claims[claimKey(item)]?.integration; return requireIntegration && integration?.phase !== 'integrated' && !selected.has(item.filePath) && !(item.filePath === ticket.filePath && currentIntegration); })) break;
+      ready.push(parent); selected.add(parent.filePath); parentId = parent.parentId;
     }
+    return ready;
+  }
+  completeIntegratedAncestors(root, ticketPath, currentIntegration) {
+    const child = this.resolveTicket(ticketPath); if (!['done', 'completed'].includes(child.state)) updateTicketAtomic(child.filePath, { state: 'done' });
+    const selected = new Set(); const parents = this.readyAncestorPaths(ticketPath, currentIntegration, selected); if (!parents.length) return {};
+    const completionPaths = currentIntegration.completionPaths || parents.map((parent) => path.relative(root, parent.filePath));
+    const expected = new Set(parents.map((parent) => path.relative(root, parent.filePath))); if (completionPaths.some((item) => !expected.has(item))) throw new Error('Persisted completion paths are no longer valid.');
+    for (const parent of parents) updateTicketAtomic(parent.filePath, { state: 'done', acceptanceCriteria: parent.acceptanceCriteria.map((item) => ({ text: item.text, completed: true })) });
+    this.execFile('git', ['-C', root, 'add', '--', ...completionPaths], { stdio: 'ignore' });
+    this.execFile('git', ['-C', root, 'commit', '-m', 'chore: complete integrated Pi tickets', '--', ...completionPaths], { stdio: 'ignore' });
+    const completionCommit = this.execFile('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const finalDestinationHead = completionCommit; appendRun(root, { event: 'parent-follow-up-committed', ticketId: ticketPath, paths: completionPaths, completionCommit, finalDestinationHead });
+    return { completionPaths, completionCommit, finalDestinationHead };
+  }
+  completeReadyAncestors(ticket, integrated = false) {
+    if (integrated) return this.completeIntegratedAncestors(ticket.cwd, ticket.filePath).completionCommit;
+    const parents = this.readyAncestorPaths(ticket.filePath, { phase: 'integrated' });
+    for (const parent of parents) { updateTicketAtomic(parent.filePath, { state: 'done', acceptanceCriteria: parent.acceptanceCriteria.map((item) => ({ text: item.text, completed: true })) }); this.runtimeStatuses.set(parent.filePath, 'done'); }
+    return undefined;
   }
   finishWorker(ticket, runIdValue, code, signal, reviewer) {
     const entry = this.children.get(runIdValue); if (!entry) return; this.children.delete(runIdValue); const escalation = this.escalationTimers.get(runIdValue); if (escalation) { clearTimeout(escalation); this.escalationTimers.delete(runIdValue); }
@@ -309,10 +411,31 @@ class PiMarkdownProvider {
     const workflow = parseWorkflow(ticket.cwd); const attempts = state.attempts[key] || 1; const retryable = !success && attempts <= workflow.retryMax;
     claim.status = success ? 'completed' : (retryable ? 'retrying' : 'blocked'); claim.finishedAt = new Date().toISOString(); claim.summary = output.slice(-2000); claim.error = success ? undefined : (reviewer && !passed ? 'Reviewer did not emit REVIEW: PASS.' : `Pi exited with code ${code}${signal ? ` (${signal})` : ''}`);
     state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim, status: claim.status }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'finished', runId: runIdValue, ticketId: ticket.id, phase: claim.phase, code, signal, status: claim.status, summary: claim.summary, error: claim.error }); this.outputs.delete(runIdValue);
-    if (success && !reviewer) { if (workflow.autoReview) { updateTicketAtomic(ticket.filePath, { state: 'review' }); this.runtimeStatuses.set(ticket.filePath, 'review'); this.startWorker(ticket, { workflow, reviewer: true, allowAnyState: true }); } else { updateTicketAtomic(ticket.filePath, { state: 'done' }); this.runtimeStatuses.set(ticket.filePath, 'done'); this.completeReadyAncestors(ticket); } }
-    else if (reviewer && success) { updateTicketAtomic(ticket.filePath, { state: 'done' }); this.runtimeStatuses.set(ticket.filePath, 'done'); this.completeReadyAncestors(ticket); }
-    else if (reviewer && requested && retryable) { this.runtimeStatuses.set(ticket.filePath, 'retrying'); updateTicketAtomic(ticket.filePath, { state: 'todo' }); const feedback = assistantText(output).slice(0, 1200) || 'Reviewer requested changes.'; appendRun(ticket.cwd, { event: 'correction-requested', runId: runIdValue, ticketId: ticket.id, feedback }); this.startWorker(ticket, { workflow, phase: 'worker', allowAnyState: true, correctionFeedback: feedback }); }
-    else if (!retryable) { updateTicketAtomic(ticket.filePath, { state: 'blocked' }); this.runtimeStatuses.set(ticket.filePath, 'needs_attention'); }
+    if (success && !reviewer) {
+      if (workflow.workspaceMode === 'worktree') {
+        try { claim.integration = captureReviewed({ metadata: claim.integration, ticketPath: claim.workspaceTicketPath, execFile: this.execFile }); claim.phase = 'pending_review'; claim.status = 'completed'; state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'captured', runId: runIdValue, ticketId: ticket.id, sourceHead: claim.integration.sourceHead }); }
+        catch (error) { claim.status = 'needs_attention'; claim.phase = 'needs_attention'; claim.error = `Worktree capture failed: ${error.message}`; state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'needs_attention', runId: runIdValue, ticketId: ticket.id, error: claim.error }); this.runtimeStatuses.set(ticket.filePath, 'needs_attention'); return; }
+      }
+      if (workflow.autoReview) { if (workflow.workspaceMode !== 'worktree') updateTicketAtomic(ticket.filePath, { state: 'review' }); this.runtimeStatuses.set(ticket.filePath, 'review'); this.startWorker(ticket, { workflow, reviewer: true, allowAnyState: true, integration: claim.integration }); } else { if (workflow.workspaceMode !== 'worktree') updateTicketAtomic(ticket.filePath, { state: 'done' }); this.runtimeStatuses.set(ticket.filePath, 'done'); this.completeReadyAncestors(ticket); }
+    }
+    else if (reviewer && success) {
+      if (workflow.workspaceMode === 'worktree') {
+        try {
+          const priorIntegrations = Object.values(state.claims || {}).map((item) => item.integration).filter((item) => item && item.phase === 'integrated');
+          claim.integration = { ...claim.integration, authorizedCommits: priorIntegrations };
+          this.attemptIntegration(ticket.cwd, key, claim, state);
+        }
+        catch (error) {
+          if (error.code === 'INTEGRATION_LOCK_BUSY') { claim.integration = { ...claim.integration, phase: 'integration_pending' }; claim.phase = 'integration_pending'; claim.status = 'completed'; state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'integration-deferred', runId: runIdValue, ticketId: ticket.id, error: error.message }); this.scheduleIntegrationRetry(ticket.cwd, key, runIdValue); return; } claim.status = 'needs_attention'; claim.phase = 'needs_attention'; claim.error = `Worktree integration failed: ${error.message}`; state.claims[key] = claim; state.runs[runIdValue] = { ...state.runs[runIdValue], ...claim }; saveState(ticket.cwd, state); appendRun(ticket.cwd, { event: 'needs_attention', runId: runIdValue, ticketId: ticket.id, error: claim.error }); this.runtimeStatuses.set(ticket.filePath, 'needs_attention'); return; }
+      }
+      if (workflow.workspaceMode !== 'worktree') updateTicketAtomic(ticket.filePath, { state: 'done' }); this.runtimeStatuses.set(ticket.filePath, 'done');
+      // attemptIntegration performs merge, finalization, and parent completion
+      // while holding the integration lock. Never run a second finalizer here.
+      if (workflow.workspaceMode === 'worktree') return;
+      this.completeReadyAncestors(ticket);
+    }
+    else if (reviewer && requested && retryable) { this.runtimeStatuses.set(ticket.filePath, 'retrying'); if (workflow.workspaceMode !== 'worktree') updateTicketAtomic(ticket.filePath, { state: 'todo' }); const feedback = assistantText(output).slice(0, 1200) || 'Reviewer requested changes.'; appendRun(ticket.cwd, { event: 'correction-requested', runId: runIdValue, ticketId: ticket.id, feedback }); this.startWorker(ticket, { workflow, phase: 'worker', allowAnyState: true, correctionFeedback: feedback, integration: claim.integration }); }
+    else if (!retryable) { if (workflow.workspaceMode !== 'worktree') updateTicketAtomic(ticket.filePath, { state: 'blocked' }); this.runtimeStatuses.set(ticket.filePath, 'needs_attention'); }
     else {
       this.runtimeStatuses.set(ticket.filePath, 'retrying');
       const delay = 100 * (2 ** Math.min(4, attempts - 1));
@@ -430,6 +553,8 @@ class PiMarkdownProvider {
     this.queueTimers.clear();
     for (const pending of this.retryTimers.values()) clearTimeout(pending.timer);
     this.retryTimers.clear();
+    for (const pending of this.integrationRetryTimers.values()) clearTimeout(pending.timer);
+    this.integrationRetryTimers.clear(); this.integrationRetryAttempts?.clear();
     for (const timer of this.escalationTimers.values()) clearTimeout(timer);
     this.escalationTimers.clear();
     const finishedAt = new Date().toISOString();
