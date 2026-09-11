@@ -1,7 +1,7 @@
 {
   "name": "constellation",
-  "version": "0.6.0",
-  "description": "A local Electron command center for Codex and Claude Code agents.",
+  "version": "0.7.0",
+  "description": "A local Electron command center for Codex, Claude Code, and Pi orchestration.",
   "author": "Sho Akiyama",
   "license": "MIT",
   "repository": "https://github.com/akiyamasho/yet-another-agent-orchestrator",
