@@ -57,7 +57,7 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
   }, [selectedThreadId]);
 
   const timeline = useMemo(() => {
-    const source = detail && typeof detail === "object" && "items" in detail && Array.isArray((detail as ChatTimeline).items) ? detail as ChatTimeline : connectionStatus === "demo" && thread ? demoTimeline(thread.provider === "claude" ? "claude" : "codex", thread.id, thread.status) : undefined;
+    const source = detail && typeof detail === "object" && "items" in detail && Array.isArray((detail as ChatTimeline).items) ? detail as ChatTimeline : connectionStatus === "demo" && thread ? demoTimeline(thread.provider ?? "codex", thread.id, thread.status) : undefined;
     if (!source) return undefined;
     return { ...source, items: source.items.map((item) => ({ ...item, path: item.path ? projectPath(folder?.path, item.path) : undefined, changes: item.changes?.map((change) => ({ ...change, path: projectPath(folder?.path, change.path) })) })) };
   }, [connectionStatus, detail, folder?.path, thread?.id, thread?.provider, thread?.status]);
@@ -314,8 +314,8 @@ function timelineRevision(value: unknown) {
   return [timeline.threadId, timeline.status, timeline.sourceStatus, timeline.externalRuntime, timeline.inferredRuntime, timeline.turnCount, items.length, ...items].join("|");
 }
 
-function demoTimeline(provider: "codex" | "claude", threadId: string, status: ThreadStatus): ChatTimeline {
-  const agent = provider === "claude" ? "Claude Code" : "Codex";
+function demoTimeline(provider: "codex" | "claude" | "pi", threadId: string, status: ThreadStatus): ChatTimeline {
+  const agent = provider === "claude" ? "Claude Code" : provider === "pi" ? "Pi" : "Codex";
   const timelineStatus = status === "running" || status === "needs_attention" || status === "failed" || status === "completed" ? status : "idle";
   const stressFixture = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("demoLongChat") === "1";
   const stressItems: ChatTimeline["items"] = stressFixture ? Array.from({ length: 72 }, (_, index) => ({

@@ -41,9 +41,11 @@ function statusOf(value: unknown, archived = false): ThreadStatus {
   if (archived || status.includes("archiv")) return "completed";
   if (status.includes("error") || status.includes("fail")) return "failed";
   if (status.includes("approval") || status.includes("input") || status.includes("attention")) return "needs_attention";
-  if (status.includes("run") || status.includes("active") || status.includes("progress")) return "running";
+  if (status.includes("run") || status.includes("active") || status.includes("progress") || status === "in-progress" || status === "in_progress") return "running";
+  if (status.includes("approval") || status.includes("input") || status.includes("attention") || status.includes("block")) return "needs_attention";
   if (status.includes("wait") || status.includes("pause")) return "waiting";
   if (status.includes("complete") || status.includes("done") || status.includes("success")) return "completed";
+  if (status === "todo" || status === "to-do" || status === "backlog" || status === "queued") return "idle";
   return (["idle", "waiting", "running", "needs_attention", "completed", "failed"] as ThreadStatus[]).includes(status as ThreadStatus) ? status as ThreadStatus : "idle";
 }
 function activeFlags(value: unknown): string[] {

@@ -26,6 +26,23 @@ test("discovers only markdown tickets under .tickets and parses frontmatter/chec
   assert.deepEqual(ticket.acceptanceCriteria.map((item) => item.completed), [true, false]);
 });
 
+test("Pi ticket edits preserve completed acceptance criteria", () => {
+  const root = tempProject();
+  fs.mkdirSync(path.join(root, ".tickets"));
+  const ticketPath = path.join(root, ".tickets", "PI-EDIT.md");
+  fs.writeFileSync(ticketPath, `# Edit me
+
+## Acceptance criteria
+
+- [x] Keep this complete
+- [ ] Finish this later
+`, "utf8");
+  const provider = new PiMarkdownProvider({ roots: [root] });
+  const updated = provider.updateTicket({ filePath: ticketPath, title: "Edited", objective: "Updated objective", acceptanceCriteria: ["Keep this complete", "Finish this later"] });
+  assert.deepEqual(updated.acceptanceCriteria.map((item) => item.completed), [true, false]);
+  assert.match(fs.readFileSync(ticketPath, "utf8"), /- \[x\] Keep this complete/);
+});
+
 test("provider restricts reads to registered project roots", () => {
   const root = tempProject();
   fs.mkdirSync(path.join(root, ".tickets"));

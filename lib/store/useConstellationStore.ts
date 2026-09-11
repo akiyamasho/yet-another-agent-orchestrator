@@ -100,12 +100,12 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
       const [codexResult, claudeResult, piResult] = await Promise.allSettled([desktop.codex.getSnapshot(), desktop.claude.getSnapshot(), desktop.pi.getSnapshot()]);
       const providerConnections: ProviderConnections = { codex: codexResult.status === "fulfilled" && codexResult.value.connected !== false ? "connected" : "offline", claude: claudeResult.status === "fulfilled" && claudeResult.value.connected !== false ? "connected" : "offline", pi: piResult.status === "fulfilled" && piResult.value.connected !== false ? "connected" : "offline" };
       try {
-        if (codexResult.status === "rejected" && claudeResult.status === "rejected" && piResult.status === "rejected") throw new Error(`Codex: ${String(codexResult.reason)} · Claude: ${String(claudeResult.reason)}`);
+        if (codexResult.status === "rejected" && claudeResult.status === "rejected" && piResult.status === "rejected") throw new Error(`Codex: ${String(codexResult.reason)} · Claude: ${String(claudeResult.reason)} · Pi: ${String(piResult.reason)}`);
         const codexSnapshot = codexResult.status === "fulfilled" ? { ...codexResult.value, threads: extractThreads(codexResult.value.threads) } : undefined;
         const normalized = normalizeProviders({ codex: codexSnapshot, claude: claudeResult.status === "fulfilled" ? claudeResult.value : undefined, pi: piResult.status === "fulfilled" ? piResult.value : undefined });
         set((state) => ({
           ...normalized,
-          connectionStatus: "connected",
+          connectionStatus: Object.values(providerConnections).every((status) => status === "offline") ? "offline" : "connected",
           providerConnections,
           connectionError: undefined,
           lastSyncedAt: new Date().toISOString(),

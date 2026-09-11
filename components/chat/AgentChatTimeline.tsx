@@ -60,7 +60,7 @@ export const AgentChatTimeline = memo(function AgentChatTimeline({ timeline, liv
 
   if (loading && !timeline) return <div className={styles.state}><LoaderCircle className={styles.spin} size={18}/> Syncing chat…</div>;
   if (error) return <div className={`${styles.state} ${styles.error}`}><CircleAlert size={18}/>{error}</div>;
-  if (!items.length) return <div className={styles.empty}><Bot size={22}/><strong>No synced messages yet</strong><p>Continue this {provider === "claude" ? "Claude Code" : "Codex"} task below. New messages and tool activity will appear here.</p></div>;
+  if (!items.length) return <div className={styles.empty}><Bot size={22}/><strong>No synced messages yet</strong><p>Continue this {provider === "claude" ? "Claude Code" : provider === "pi" ? "Pi" : "Codex"} task below. New messages and tool activity will appear here.</p></div>;
 
   return <div className={styles.timeline}>
     {timeline?.externalRuntime && <div className={styles.syncNotice}><span>{timeline.inferredRuntime ? "Active in another Codex window" : "Synced from Codex history"}</span><p>Chat content refreshes here. The other window keeps its exact stop/running signal and unpersisted tool events until you continue the task from Constellation.</p></div>}
@@ -72,7 +72,7 @@ export const AgentChatTimeline = memo(function AgentChatTimeline({ timeline, liv
       const open = expanded[item.id] ?? item.kind === "plan";
       return <EventItem key={item.id} item={item} open={open} onToggle={toggleExpanded}/>;
     })}
-    {timeline?.status === "running" && liveness?.state !== "possibly_stalled" && liveness?.state !== "quiet" && <div className={styles.live}><span/><strong>{provider === "claude" ? "Claude Code" : "Codex"} is working</strong><i/><i/><i/></div>}
+    {timeline?.status === "running" && liveness?.state !== "possibly_stalled" && liveness?.state !== "quiet" && <div className={styles.live}><span/><strong>{provider === "claude" ? "Claude Code" : provider === "pi" ? "Pi" : "Codex"} is working</strong><i/><i/><i/></div>}
     {timeline?.status === "running" && (liveness?.state === "possibly_stalled" || liveness?.state === "quiet") && <div className={`${styles.live} ${liveness.state === "possibly_stalled" ? styles.stalled : styles.quiet}`} role="status"><span/><strong>{formatLivenessNotice(liveness)}</strong></div>}
   </div>;
 });
@@ -80,7 +80,7 @@ export const AgentChatTimeline = memo(function AgentChatTimeline({ timeline, liv
 const Message = memo(function Message({ item, provider }: { item: ChatTimelineItem; provider: AgentProvider }) {
   const user = item.role === "user";
   return <article className={`${styles.message} ${user ? styles.user : styles.assistant}`}>
-    <header>{user ? <UserRound size={14}/> : <Bot size={14}/>}<strong>{user ? "You" : provider === "claude" ? "Claude" : "Codex"}</strong>{item.timestamp && <time>{time(item.timestamp)}</time>}</header>
+    <header>{user ? <UserRound size={14}/> : <Bot size={14}/>}<strong>{user ? "You" : provider === "claude" ? "Claude" : provider === "pi" ? "Pi" : "Codex"}</strong>{item.timestamp && <time>{time(item.timestamp)}</time>}</header>
     <div>{item.text}</div>
   </article>;
 }, (previous, next) => previous.provider === next.provider && sameItem(previous.item, next.item));

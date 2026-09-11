@@ -188,7 +188,7 @@ function activeTurnId(threadResult) {
   const active = [...turns].reverse().find((turn) => {
     const value = turn?.status || turn?.state || "";
     const status = value && typeof value === "object" ? value.type || value.status || value.state || "" : value;
-    return /inprogress|in_progress|running|active|started/i.test(String(status));
+    return /inprogress|in[-_ ]progress|running|active|started/i.test(String(status));
   });
   return active?.id || thread?.status?.activeTurnId || thread?.status?.active_turn_id || null;
 }
