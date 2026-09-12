@@ -154,8 +154,16 @@ class CodexAppServerBridge extends EventEmitter {
         const params = { ...options, archived, sourceKinds, cursor };
         delete params.all;
         const page = await this.request('thread/list', params);
-        all.push(...(page?.data || page?.threads || []).map((thread) => ({ ...thread, archived })));
-        cursor = page?.nextCursor ?? page?.next_cursor ?? null;
+        // App-server versions have returned both a direct page and an
+        // additional `result` envelope. Accept all known page containers so
+        // a successful creation is not hidden by an empty refresh.
+        const pageObject = page && typeof page === 'object' ? page : {};
+        const pageResult = pageObject.result && typeof pageObject.result === 'object' ? pageObject.result : pageObject;
+        const pageThreads = Array.isArray(pageResult)
+          ? pageResult
+          : [pageResult.data, pageResult.threads, pageResult.items].find(Array.isArray) || [];
+        all.push(...pageThreads.map((thread) => ({ ...thread, archived })));
+        cursor = pageResult.nextCursor ?? pageResult.next_cursor ?? pageObject.nextCursor ?? pageObject.next_cursor ?? null;
       } while (cursor && options.all !== false);
     }
     const seen = new Set();
@@ -163,6 +171,7 @@ class CodexAppServerBridge extends EventEmitter {
   }
 
   readThread(threadId, options = {}) { return this.request('thread/read', { threadId, ...options }); }
+  readRateLimits() { return this.request('account/rateLimits/read'); }
   startThread(params = {}) { return this.request('thread/start', params); }
   resumeThread(threadId, params = {}) { return this.request('thread/resume', { threadId, ...params }); }
   async startTurn(threadId, input, params = {}) {

@@ -1,7 +1,9 @@
 const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, nativeImage, shell } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
-const { CodexAppServerBridge } = require("./codex/app-server-bridge.cjs");
+const { CodexAppServerBridge, ALL_SOURCE_KINDS } = require("./codex/app-server-bridge.cjs");
+const { PendingCreatedThreads } = require("./codex/pending-created-threads.cjs");
+const { archiveThreadAndForget } = require("./codex/archive-thread.cjs");
 const { ClaudeCodeProvider } = require("./claude/provider.cjs");
 const { PiMarkdownProvider } = require("./pi/provider.cjs");
 const { registerPiRecoveryIpc } = require("./pi/recovery-ipc.cjs");
@@ -20,6 +22,7 @@ const recentEvents = [];
 const recentClaudeEvents = [];
 const codexRuntimeStatuses = new Map();
 const codexLiveItems = new Map();
+const pendingCreatedThreads = new PendingCreatedThreads();
 const allowedProjectRoots = new Set();
 const attachmentGrants = new Map();
 const MAX_ATTACHMENTS = 10;
@@ -229,6 +232,10 @@ function cleanupPreviousUpdate() {
 function rememberNotification(message) {
   const params = message.params || {};
   const threadId = params.threadId || params.thread_id || params.thread?.id || params.turn?.threadId;
+  if (message.method === "thread/deleted") {
+    const deletedId = params.threadId || params.thread_id || params.thread?.id || params.id;
+    if (deletedId) pendingCreatedThreads.remove(deletedId);
+  }
   if (threadId) {
     if (message.method === "thread/status/changed" && params.status) codexRuntimeStatuses.set(String(threadId), params.status);
     else if (message.method === "turn/started") codexRuntimeStatuses.set(String(threadId), { type: "active", activeFlags: [] });
@@ -325,7 +332,7 @@ async function ensureCodex() {
 
 async function snapshot() {
   const bridge = await ensureCodex();
-  const threads = await bridge.listThreads({
+  let threads = await bridge.listThreads({
     archived: false,
     limit: 200,
     sortKey: "recency_at",
@@ -333,8 +340,9 @@ async function snapshot() {
     // Fast inventory path: selected Chat views use thread/read for repaired,
     // full history while live status is overlaid from this process's events.
     useStateDbOnly: true,
-    sourceKinds: ["cli", "vscode", "exec", "appServer", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "unknown"],
+    sourceKinds: ALL_SOURCE_KINDS,
   });
+  threads = pendingCreatedThreads.overlay(threads, { includePending: (thread) => !thread.archived });
   threads.forEach((thread) => {
     rememberProjectRoot(thread.cwd);
     const runtime = codexRuntimeStatuses.get(String(thread.id));
@@ -447,7 +455,7 @@ function registerIpc() {
     if (!fs.statSync(canonical).isDirectory()) throw new Error("Project path must be a directory.");
     writeProjects([...readProjects(), canonical]);
     rememberProjectRoot(canonical);
-    return readProjects();
+    return { canonical, projects: readProjects() };
   });
   ipcMain.handle("projects:list", () => readProjects());
   ipcMain.handle("appearance:get-scale", () => Number(readPreferences().uiScale) || 1);
@@ -487,6 +495,14 @@ function registerIpc() {
     return grantAttachment(saveClipboardImage({ image: clipboard.readImage(), userData: app.getPath("userData"), maxBytes: MAX_ATTACHMENT_BYTES }));
   });
   ipcMain.handle("codex:snapshot", () => snapshot());
+  ipcMain.handle("codex:rate-limits", async () => {
+    try {
+      return { available: true, data: await (await ensureCodex()).readRateLimits() };
+    } catch (error) {
+      // Missing auth or an older app-server is not a provider connection failure.
+      return { available: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
   ipcMain.handle("codex:read-thread", async (_event, threadId) => {
     const raw = await (await ensureCodex()).readThread(String(threadId), { includeTurns: true });
     const live = [...(codexLiveItems.get(String(threadId))?.values() || [])];
@@ -518,7 +534,9 @@ function registerIpc() {
       ...(optionalModel(input.model) ? { model: input.model } : {}),
       ...(input.reasoningEffort && input.reasoningEffort !== "default" ? { effort: input.reasoningEffort } : {}),
     });
-    return { ...response, thread: { ...response.thread, name: input.title?.trim() || response.thread.name } };
+    const returnedThread = { ...response.thread, name: input.title?.trim() || response.thread.name, cwd: response.thread.cwd || input.cwd };
+    pendingCreatedThreads.remember(returnedThread);
+    return { ...response, thread: returnedThread };
   });
   ipcMain.handle("codex:start-subagent", async (_event, input) => {
     const bridge = await ensureCodex();
@@ -540,7 +558,11 @@ function registerIpc() {
     if (Object.keys(settings).length) await bridge.updateThreadSettings(input.threadId, settings);
     return bridge.readThread(input.threadId, { includeTurns: false });
   });
-  ipcMain.handle("codex:archive-thread", async (_event, threadId) => (await ensureCodex()).archiveThread(String(threadId)));
+  ipcMain.handle("codex:archive-thread", (_event, threadId) => archiveThreadAndForget({
+    threadId,
+    archiveThread: async (id) => (await ensureCodex()).archiveThread(id),
+    pendingThreads: pendingCreatedThreads,
+  }));
   ipcMain.handle("codex:unarchive-thread", async (_event, threadId) => (await ensureCodex()).unarchiveThread(String(threadId)));
   ipcMain.handle("codex:delete-thread", (_event, threadId) => deleteCodex(threadId));
   ipcMain.handle("claude:snapshot", () => claudeSnapshot());

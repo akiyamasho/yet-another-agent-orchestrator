@@ -5,8 +5,10 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { mockState } from "@/lib/data/mockData";
 import { normalizeProviders, splitProviderThreadId } from "@/lib/providers";
 import { extractThreads } from "@/lib/codex/mapper";
+import { normalizeCodex } from "@/lib/providers/normalize";
 import type { AgentEvent, AgentProvider, AgentThread, CreateFolderInput, CreateThreadInput, FolderContext, NormalizedState, ThreadStatus, ViewMode } from "@/lib/types";
 import type { PiSchedulerState } from "@/lib/providers/types";
+import { createSnapshotCoordinator } from "./snapshot-coordinator.cjs";
 
 export type ConnectionStatus = "loading" | "connected" | "offline" | "demo";
 export type ProviderConnections = Record<AgentProvider, ConnectionStatus>;
@@ -52,7 +54,7 @@ type Store = NormalizedState & {
 
 const emptyState: NormalizedState = { folders: {}, threads: {}, events: {} };
 const id = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-let syncInFlight: Promise<void> | undefined;
+const syncCoordinator = createSnapshotCoordinator();
 
 function localArchive(state: Store, threadId: string, strategy: "tree" | "reparent") {
   const ids = new Set([threadId]);
@@ -100,9 +102,7 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
   setConnection: (connectionStatus, connectionError) => set({ connectionStatus, connectionError }),
   setProviderConnection: (provider, status) => set((state) => ({ providerConnections: { ...state.providerConnections, [provider]: status } })),
   setThreadRuntimeStatus: (threadId, status) => set((state) => !state.threads[threadId] || state.threads[threadId].status === status ? state : ({ threads: { ...state.threads, [threadId]: { ...state.threads[threadId], status } } })),
-  syncFromSource: async () => {
-    if (syncInFlight) return syncInFlight;
-    syncInFlight = (async () => {
+  syncFromSource: () => syncCoordinator.run(async () => {
       const desktop = window.constellationDesktop;
       if (!desktop) {
         set({ ...mockState, connectionStatus: "demo", providerConnections: { codex: "demo", claude: "demo", pi: "demo" }, connectionError: undefined, lastSyncedAt: new Date().toISOString() });
@@ -129,15 +129,14 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
       } catch (error) {
         set({ connectionStatus: "offline", providerConnections, connectionError: error instanceof Error ? error.message : String(error) });
       }
-    })().finally(() => { syncInFlight = undefined; });
-    return syncInFlight;
-  },
+  }),
   createFolder: async (input) => {
     const desktop = window.constellationDesktop;
     if (desktop) {
-      await desktop.projects.add(input.path);
+      const registered = await desktop.projects.add(input.path);
       await get().syncFromSource();
-      const folder = Object.values(get().folders).find((item) => item.path === input.path);
+      const effectivePath = registered && typeof registered === "object" && "canonical" in registered ? String((registered as { canonical: string }).canonical) : input.path;
+      const folder = Object.values(get().folders).find((item) => item.path === effectivePath || item.path === input.path);
       if (!folder) throw new Error("The agent project folder could not be registered.");
       return folder;
     }
@@ -152,11 +151,15 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
     const provider = input.parentId ? get().threads[input.parentId]?.provider ?? input.provider ?? "codex" : input.provider ?? "codex";
     if (desktop) {
       if (provider === "pi") {
+        const registered = await desktop.projects.add(folder.path);
+        const effectivePath = registered && typeof registered === "object" && "canonical" in registered ? String((registered as { canonical: string }).canonical) : folder.path;
         const parentTicketId = input.parentId ? get().threads[input.parentId]?.key : undefined;
-        const created = await desktop.pi.createTicket({ cwd: folder.path, title: input.title, objective: input.objective, acceptanceCriteria: input.acceptanceCriteria, parentId: parentTicketId });
+        const created = await desktop.pi.createTicket({ cwd: effectivePath, title: input.title, objective: input.objective, acceptanceCriteria: input.acceptanceCriteria, parentId: parentTicketId });
         await get().syncFromSource();
         const filePath = created && typeof created === "object" && "filePath" in created ? String((created as { filePath: string }).filePath) : "";
-        return get().threads[`pi:${filePath}`];
+        const result = get().threads[`pi:${filePath}`];
+        if (!result) throw new Error("Pi created the task, but it was not returned in the refreshed ticket list.");
+        return result;
       }
       if (provider === "claude") {
         if (input.parentId) {
@@ -177,11 +180,22 @@ export const useConstellationStore = create<Store>()(persist((set, get) => ({
         return get().threads[input.parentId];
       }
       const response = await bridge.startThread({ cwd: folder.path, title: input.title, objective: input.objective, model: input.model, reasoningEffort: input.reasoningEffort, permission: input.permission });
-      const responseThread = response && typeof response === "object" && "thread" in response ? (response as { thread?: { id?: string } }).thread : undefined;
+      const responseRecord = response && typeof response === "object" ? response as Record<string, unknown> : undefined;
+      const responseResult = responseRecord?.result && typeof responseRecord.result === "object" ? responseRecord.result as Record<string, unknown> : responseRecord;
+      const responseThread = responseResult?.thread && typeof responseResult.thread === "object"
+        ? responseResult.thread as Record<string, unknown>
+        : responseResult?.id ? responseResult : undefined;
       await get().syncFromSource();
-      const created = responseThread?.id ? get().threads[`codex:${responseThread.id}`] : undefined;
-      if (!created) throw new Error("Codex created the task, but it was not returned in the refreshed thread list.");
-      return created;
+      const created = responseThread?.id ? get().threads[`codex:${String(responseThread.id)}`] : undefined;
+      if (created) return created;
+      if (responseThread?.id) {
+        const fallback = normalizeCodex({ threads: [{ ...responseThread, cwd: responseThread.cwd || folder.path } as never], projects: [folder.path], events: [] }).threads[`codex:${String(responseThread.id)}`];
+        if (fallback) {
+          set((state) => ({ threads: { ...state.threads, [fallback.id]: fallback } }));
+          return fallback;
+        }
+      }
+      throw new Error("Codex created the task, but its authoritative response was incomplete.");
     }
     const thread = { id: id("thread"), key: `NEW-${Date.now().toString().slice(-4)}`, title: input.title, objective: input.objective, folderId: input.folderId, parentId: input.parentId, summary: "Starting task.", profile: input.profile ?? "builder", status: "idle", model: input.model ?? "Codex", reasoningEffort: input.reasoningEffort ?? "medium", permission: input.permission ?? "workspace-write", branch: input.branch, provider } satisfies AgentThread;
     set((state) => ({ threads: { ...state.threads, [thread.id]: thread } }));

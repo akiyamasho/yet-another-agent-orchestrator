@@ -44,7 +44,7 @@ declare global {
       selectDirectory: () => Promise<string | null>;
       projects: {
         list: () => Promise<string[]>;
-        add: (projectPath: string) => Promise<string[]>;
+        add: (projectPath: string) => Promise<{ canonical: string; projects: string[] }>;
       };
       updates: {
         getState: () => Promise<UpdateState>;
@@ -62,6 +62,7 @@ declare global {
       };
       codex: {
         getSnapshot: () => Promise<CodexBridgeSnapshotResponse>;
+        getRateLimits: () => Promise<{ available: boolean; data?: unknown; error?: string }>;
         readThread: (threadId: string) => Promise<unknown>;
         continueThread: (input: ContinueInput & { threadId: string }) => Promise<{ mode: "steer" | "turn" }>;
         interruptThread: (threadId: string) => Promise<{ mode: "interrupt"; interrupted: boolean; threadId: string; turnId: string }>;

@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld("constellationDesktop", {
   },
   codex: {
     getSnapshot: () => ipcRenderer.invoke("codex:snapshot"),
+    getRateLimits: () => ipcRenderer.invoke("codex:rate-limits"),
     readThread: (threadId) => ipcRenderer.invoke("codex:read-thread", threadId),
     continueThread: (input) => ipcRenderer.invoke("codex:continue-thread", input),
     interruptThread: (threadId) => ipcRenderer.invoke("codex:interrupt-thread", threadId),

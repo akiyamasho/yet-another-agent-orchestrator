@@ -20,6 +20,7 @@ function fakeSpawn() {
     if (message.method === 'turn/steer') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { turnId: message.params.expectedTurnId, received: message.params } }) + '\n');
     if (message.method === 'turn/interrupt') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { interrupted: true, received: message.params } }) + '\n');
     if (message.method === 'thread/name/set') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { received: message.params } }) + '\n');
+    if (message.method === 'account/rateLimits/read') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { primary: { usedPercent: 25, windowDurationMins: 300, resetAt: 1730000000 } } }) + '\n');
   });
   return child;
 }
@@ -29,6 +30,75 @@ test('initializes and lists active plus archived threads across all source kinds
   await bridge.connect();
   const threads = await bridge.listThreads();
   assert.deepEqual(threads.map((t) => t.id), ['active', 'archived']);
+  bridge.close();
+});
+
+test('reads account rate limits through the supported app-server method', async () => {
+  const bridge = new CodexAppServerBridge({ spawn: () => fakeSpawn(), requestTimeoutMs: 500 });
+  await bridge.connect();
+  assert.deepEqual(await bridge.readRateLimits(), { primary: { usedPercent: 25, windowDurationMins: 300, resetAt: 1730000000 } });
+  bridge.close();
+});
+
+test('accepts page items and returns archived plus unarchived inventory', async () => {
+  const spawn = () => {
+    const child = fakeSpawn();
+    child.stdin.removeAllListeners('data');
+    child.stdin.on('data', (chunk) => {
+      const message = JSON.parse(String(chunk));
+      if (message.method === 'initialize') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }) + '\n');
+      if (message.method === 'thread/list') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { items: [{ id: message.params.archived ? 'archived-item' : 'active-item', source: { kind: 'subAgentOther' } }] } }) + '\n');
+    });
+    return child;
+  };
+  const bridge = new CodexAppServerBridge({ spawn, requestTimeoutMs: 500 });
+  await bridge.connect();
+  const threads = await bridge.listThreads();
+  assert.deepEqual(threads.map((thread) => [thread.id, thread.archived]), [['active-item', false], ['archived-item', true]]);
+  bridge.close();
+});
+
+test('accepts threads and ignores non-array page fields', async () => {
+  const spawn = () => {
+    const child = fakeSpawn();
+    child.stdin.removeAllListeners('data');
+    child.stdin.on('data', (chunk) => {
+      const message = JSON.parse(String(chunk));
+      if (message.method === 'initialize') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }) + '\n');
+      if (message.method === 'thread/list') {
+        const result = message.params.archived
+          ? { data: { invalid: true }, items: [{ id: 'archived-safe' }] }
+          : { threads: [{ id: 'active-safe' }] };
+        child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }) + '\n');
+      }
+    });
+    return child;
+  };
+  const bridge = new CodexAppServerBridge({ spawn, requestTimeoutMs: 500 });
+  await bridge.connect();
+  assert.deepEqual((await bridge.listThreads()).map((thread) => thread.id), ['active-safe', 'archived-safe']);
+  bridge.close();
+});
+
+test('unwraps nested result envelopes and item pages while preserving pagination', async () => {
+  const spawn = () => {
+    const child = fakeSpawn();
+    child.stdin.removeAllListeners('data');
+    child.stdin.on('data', (chunk) => {
+      const message = JSON.parse(String(chunk));
+      if (message.method === 'initialize') child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }) + '\n');
+      if (message.method === 'thread/list') {
+        const page = message.params.cursor
+          ? { items: [{ id: 'second' }] }
+          : { items: [{ id: 'first' }], nextCursor: 'page-2' };
+        child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { result: page } }) + '\n');
+      }
+    });
+    return child;
+  };
+  const bridge = new CodexAppServerBridge({ spawn, requestTimeoutMs: 500 });
+  await bridge.connect();
+  assert.deepEqual((await bridge.listThreads({ archived: false })).map((thread) => thread.id), ['first', 'second']);
   bridge.close();
 });
 
