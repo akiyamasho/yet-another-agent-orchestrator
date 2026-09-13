@@ -46,6 +46,12 @@ declare global {
         list: () => Promise<string[]>;
         add: (projectPath: string) => Promise<{ canonical: string; projects: string[] }>;
       };
+      folders: { open: (folderPath: string) => Promise<{ path: string }> };
+      terminal: {
+        start: (input: { cwd: string; command: string }) => Promise<{ runId: string; cwd: string }>;
+        cancel: (runId: string) => Promise<boolean>;
+        onEvent: (listener: (event: { runId: string; type: "started" | "output" | "exit"; cwd?: string; stream?: "stdout" | "stderr"; text?: string; code?: number | null; signal?: string | null; truncated?: boolean }) => void) => () => void;
+      };
       updates: {
         getState: () => Promise<UpdateState>;
         check: () => Promise<UpdateState>;

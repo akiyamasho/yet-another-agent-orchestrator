@@ -1,6 +1,6 @@
 {
   "name": "constellation",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "A local Electron command center for Codex, Claude Code, and Pi orchestration.",
   "author": "Sho Akiyama",
   "license": "MIT",

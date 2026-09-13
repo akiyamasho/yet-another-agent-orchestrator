@@ -10,6 +10,7 @@ const { registerPiRecoveryIpc } = require("./pi/recovery-ipc.cjs");
 const { normalizeCodexTimeline, normalizeClaudeTimeline } = require("./chat/timeline.cjs");
 const { cleanupClipboardImages, saveClipboardImage, saveClipboardImageBytes } = require("./attachments/clipboard-image.cjs");
 const { GitHubReleaseUpdater } = require("./updater/github-release-updater.cjs");
+const { makeTerminalRunner } = require("./terminal-runner.cjs");
 
 const isMac = process.platform === "darwin";
 let mainWindow = null;
@@ -27,6 +28,16 @@ const allowedProjectRoots = new Set();
 const attachmentGrants = new Map();
 const MAX_ATTACHMENTS = 10;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const terminalRunner = makeTerminalRunner({
+  validateCwd: (cwd) => {
+    if (typeof cwd !== "string" || !path.isAbsolute(cwd)) return null;
+    let resolved;
+    try { resolved = fs.realpathSync(cwd); } catch { return null; }
+    for (const root of allowedProjectRoots) if (resolved === root && fs.statSync(resolved).isDirectory()) return resolved;
+    return null;
+  },
+  send: (sender, channel, payload) => sender.send(channel, payload),
+});
 
 function ensurePi() {
   if (!piProvider) piProvider = new PiMarkdownProvider({ roots: readProjects() });
@@ -458,6 +469,15 @@ function registerIpc() {
     return { canonical, projects: readProjects() };
   });
   ipcMain.handle("projects:list", () => readProjects());
+  ipcMain.handle("folders:open", async (_event, folderPath) => {
+    const resolved = terminalRunner ? (typeof folderPath === "string" && path.isAbsolute(folderPath) ? (() => { try { return fs.realpathSync(folderPath); } catch { return null; } })() : null) : null;
+    if (!resolved || ![...allowedProjectRoots].includes(resolved) || !fs.statSync(resolved).isDirectory()) throw new Error("That agent folder is not a registered project directory.");
+    const error = await shell.openPath(resolved);
+    if (error) throw new Error(error || "Could not open the agent folder in Finder.");
+    return { path: resolved };
+  });
+  ipcMain.handle("terminal:start", (event, input) => terminalRunner.start(event.sender, input));
+  ipcMain.handle("terminal:cancel", (event, runId) => terminalRunner.cancel(event.sender, runId));
   ipcMain.handle("appearance:get-scale", () => Number(readPreferences().uiScale) || 1);
   ipcMain.handle("appearance:set-scale", (event, value) => {
     const scale = [1, 1.1, 1.2].includes(Number(value)) ? Number(value) : 1;
@@ -632,6 +652,8 @@ function createWindow() {
     console.log(`Constellation renderer ready: ${mainWindow.webContents.getURL()}`);
   });
   mainWindow.webContents.on("did-fail-load", (_event, code, description) => console.error(`Constellation renderer failed (${code}): ${description}`));
+  mainWindow.webContents.on("render-process-gone", () => terminalRunner.closeSender(mainWindow.webContents));
+  mainWindow.on("closed", () => terminalRunner.closeSender(mainWindow.webContents));
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://")) void shell.openExternal(url);
     return { action: "deny" };
@@ -653,5 +675,5 @@ app.whenReady().then(() => {
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.on("before-quit", () => { piProvider?.close(); codexBridge?.close(); });
+app.on("before-quit", () => { terminalRunner.closeAll(); piProvider?.close(); codexBridge?.close(); });
 app.on("window-all-closed", () => { if (!isMac) app.quit(); });

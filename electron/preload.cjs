@@ -12,6 +12,18 @@ contextBridge.exposeInMainWorld("constellationDesktop", {
     list: () => ipcRenderer.invoke("projects:list"),
     add: (projectPath) => ipcRenderer.invoke("projects:add", projectPath),
   },
+  folders: {
+    open: (folderPath) => ipcRenderer.invoke("folders:open", folderPath),
+  },
+  terminal: {
+    start: (input) => ipcRenderer.invoke("terminal:start", input),
+    cancel: (runId) => ipcRenderer.invoke("terminal:cancel", runId),
+    onEvent: (listener) => {
+      const handler = (_event, payload) => listener(payload);
+      ipcRenderer.on("terminal:event", handler);
+      return () => ipcRenderer.removeListener("terminal:event", handler);
+    },
+  },
   updates: {
     getState: () => ipcRenderer.invoke("updates:get-state"),
     check: () => ipcRenderer.invoke("updates:check"),

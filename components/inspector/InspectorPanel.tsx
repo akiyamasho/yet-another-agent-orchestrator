@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, CircleAlert, Clock3, Pause, Play, RotateCcw, Square, X } from "lucide-react";
+import { ChevronRight, CircleAlert, Clock3, FolderOpen, Pause, Play, RotateCcw, Square, Terminal as TerminalIcon, X } from "lucide-react";
 import { AgentChatTimeline, type ChatTimeline } from "@/components/chat/AgentChatTimeline";
 import { ThreadComposer } from "@/components/inspector/ThreadComposer";
 import { providerMeta, splitProviderThreadId } from "@/lib/providers";
@@ -10,7 +10,7 @@ import type { AgentThread, ThreadStatus } from "@/lib/types";
 import { classifyLiveness, formatLivenessNotice } from "@/lib/runtime/liveness";
 import styles from "./InspectorPanel.module.css";
 
-type InspectorTab = "overview" | "subagents" | "activity" | "chat";
+type InspectorTab = "overview" | "subagents" | "activity" | "chat" | "terminal";
 const statusLabel: Record<ThreadStatus, string> = { running: "Running", waiting: "Waiting", needs_attention: "Needs attention", completed: "Completed", failed: "Failed", idle: "Idle" };
 const formatTime = (iso?: string) => iso ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(iso)) : "—";
 const piPhaseLabel = (phase?: string) => phase === "planning" || phase === "planner" ? "PLANNER" : phase === "reviewer" ? "REVIEWER" : "WORKER";
@@ -39,6 +39,11 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
   const scrollFrame = useRef<number | undefined>(undefined);
   const pinnedToBottom = useRef(true);
   const [cancelRequest, setCancelRequest] = useState(0);
+  const [terminalCommand, setTerminalCommand] = useState("");
+  const [terminalOutput, setTerminalOutput] = useState("");
+  const [terminalRun, setTerminalRun] = useState<{ runId: string; cwd: string } | undefined>(undefined);
+  const [terminalError, setTerminalError] = useState<string>();
+  const terminalRunRef = useRef<{ runId: string; cwd: string } | undefined>(undefined);
   const selectedThreadId = useConstellationStore((s) => threadId ?? s.selectedThreadId);
   const thread = useConstellationStore((s) => selectedThreadId ? s.threads[selectedThreadId] : undefined);
   const folder = useConstellationStore((s) => thread ? s.folders[thread.folderId] : undefined);
@@ -60,6 +65,28 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
     if (selectedThreadId) setTab(thread?.piKind === "run" ? "activity" : "chat");
   }, [selectedThreadId, thread?.piKind]);
 
+  useEffect(() => {
+    const desktop = window.constellationDesktop;
+    if (!desktop) return;
+    return desktop.terminal.onEvent((event) => {
+      // The child can emit output before terminal.start() resolves. Claim the
+      // run from its first started event so no fast output is dropped.
+      if (!terminalRunRef.current && event.type === "started" && event.cwd) {
+        terminalRunRef.current = { runId: event.runId, cwd: event.cwd };
+        setTerminalRun(terminalRunRef.current);
+      }
+      if (!terminalRunRef.current || event.runId !== terminalRunRef.current.runId) return;
+      if (event.type === "output" && event.text) setTerminalOutput((current) => `${current}${event.text}`.slice(-1024 * 1024));
+      if (event.type === "exit") { terminalRunRef.current = undefined; setTerminalRun(undefined); }
+    });
+  }, []);
+
+  useEffect(() => () => {
+    const run = terminalRunRef.current;
+    terminalRunRef.current = undefined;
+    if (run) void window.constellationDesktop?.terminal.cancel(run.runId);
+  }, [selectedThreadId]);
+
   const timeline = useMemo(() => {
     const source = detail && typeof detail === "object" && "items" in detail && Array.isArray((detail as ChatTimeline).items) ? detail as ChatTimeline : connectionStatus === "demo" && thread ? demoTimeline(thread.provider ?? "codex", thread.id, thread.status) : undefined;
     if (!source) return undefined;
@@ -76,6 +103,11 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
   const reveal = useCallback(async (filePath: string) => { await window.constellationDesktop?.files.reveal(projectPath(folder?.path, filePath)); }, [folder?.path]);
   const handlePreview = useCallback((filePath: string) => { void loadPreview(filePath, true); }, [loadPreview]);
   const handleReveal = useCallback((filePath: string) => { void reveal(filePath); }, [reveal]);
+  const openFolder = useCallback(async () => {
+    if (!folder) return;
+    try { await window.constellationDesktop?.folders.open(folder.path); }
+    catch (error) { setTerminalError(error instanceof Error ? error.message : String(error)); }
+  }, [folder?.path]);
 
   const applyDetail = useCallback((response: unknown) => {
     const revision = timelineRevision(response);
@@ -294,7 +326,8 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
       {thread.status === "running" && liveness.state !== "active" && liveness.state !== "unknown" && <div className={`${styles.livenessNotice} ${liveness.state === "possibly_stalled" ? styles.stalledNotice : ""}`} role="status"><CircleAlert size={14}/><span><strong>{formatLivenessNotice(liveness)}</strong>. This may be a long-running command; inspect the original {provider.label} task if it needs attention.</span></div>}
       {runActionError && <p className={styles.error} role="alert">{runActionError} <button type="button" onClick={() => setRunActionError(undefined)}>Dismiss</button></p>}
       {thread.provider === "pi" && thread.piKind === "run" && <PiRunRecovery thread={thread} recoveryBusy={recoveryBusy} onRetryReview={retryReview} onRetryIntegration={retryIntegration} onCleanup={cleanupRun} />}
-      <div className={styles.actions}>
+    <div className={styles.actions}>
+        {thread.parentId === undefined && thread.piKind !== "run" && <><button onClick={() => void openFolder()}><FolderOpen size={14}/> Open folder</button><button onClick={() => { setTerminalError(undefined); setTab("terminal"); }}><TerminalIcon size={14}/> Terminal</button></>}
         {isMapView && onBackToNow && <button className={styles.primary} onClick={onBackToNow}><RotateCcw size={14}/> Back to Now</button>}
         {thread.provider === "pi" && live ? (thread.piKind === "run" ? (thread.runPhase !== "planning" && (thread.status === "running" ? <button className={styles.danger} onClick={() => void stopPiTicket()}><Square size={13}/> Interrupt run</button> : !["pending_review", "integration_pending", "integrating", "completing", "integrated"].includes(thread.integrationPhase || "") ? <button className={styles.primary} onClick={() => void runPiTicket()}><RotateCcw size={14}/> Retry run</button> : null)) : (thread.status === "running" ? <button className={styles.danger} onClick={() => void stopPiTicket()}><Square size={13}/> Interrupt worker</button> : dispatchablePiTicket ? <button className={styles.primary} onClick={() => void runPiTicket()}><Play size={14}/> Dispatch ticket</button> : null)) : null}
         {!live && (thread.status === "running" ? <><button onClick={() => action("waiting")}><Pause size={14}/> Pause</button><button className={styles.danger} onClick={() => action("idle")}><Square size={13}/> Stop</button></> : <button className={styles.primary} onClick={() => action("running")}><Play size={14}/> {thread.status === "waiting" ? "Resume" : "Run again"}</button>)}
@@ -302,11 +335,12 @@ export function InspectorPanel({ threadId, isMapView, onBackToNow, onClose, onAd
       </div>
     </div>
     {attention && <section className={styles.attention} aria-live="polite"><div className={styles.attentionTitle}><CircleAlert size={17}/> Action required</div><strong>{thread.attention?.kind === "approval" ? "Approval requested" : "Input needed"}</strong><p>{thread.attention?.message}</p><small>From {thread.title} · {thread.permission}</small>{live ? <p className={styles.liveNotice}>Respond in the original {provider.label} task. Constellation keeps this read-only until the provider reports the response.</p> : <div className={styles.attentionActions}><button className={styles.primary} onClick={() => setAttentionDone(true)}>Approve once</button><button onClick={() => setAttentionDone(true)}>Always allow…</button><button className={styles.reject} onClick={() => { setAttentionDone(true); action("failed"); }}>Reject</button></div>}</section>}
-    <nav className={styles.tabs} aria-label="Inspector sections">{((thread.piKind === "run" ? ["overview", "activity"] : ["chat", "overview", "subagents", "activity"]) as InspectorTab[]).map((name) => <button key={name} className={tab === name ? styles.activeTab : ""} onClick={() => setTab(name)} aria-selected={tab === name} role="tab">{name[0].toUpperCase() + name.slice(1)}{name === "subagents" && children.length ? <b>{children.length}</b> : null}</button>)}</nav>
+    <nav className={styles.tabs} aria-label="Inspector sections">{((thread.piKind === "run" ? ["overview", "activity"] : ["chat", "overview", "subagents", "activity", ...(thread.parentId === undefined ? ["terminal"] : [])]) as InspectorTab[]).map((name) => <button key={name} className={tab === name ? styles.activeTab : ""} onClick={() => setTab(name)} aria-selected={tab === name} role="tab">{name[0].toUpperCase() + name.slice(1)}{name === "subagents" && children.length ? <b>{children.length}</b> : null}</button>)}</nav>
     <div ref={bodyRef} className={styles.body} role="tabpanel">
       {tab === "overview" && <><section className={styles.card}>{thread.piKind === "run" ? <><label>Run details</label><p>{piPhaseLabel(thread.runPhase)} · {thread.model}</p><p>{thread.workspace || thread.projectRoot}</p><p>{thread.branch || "No branch"}</p><p>Integration: {thread.integrationPhase || "—"} · review: {thread.reviewResult?.status || "—"} · cleanup: {thread.cleanupPhase || "not cleaned"}</p><p>Commits: source {shortCommit(thread.sourceHead)} · merge {shortCommit(thread.mergeCommit)} · completion {shortCommit(thread.completionCommit)} · destination {shortCommit(thread.finalDestinationHead)}</p>{thread.error && <p role="alert">{thread.error}</p>}</> : null}<label>Objective</label><p className={styles.objective}>{thread.objective || "No objective provided."}</p><label>What it is doing now</label><p>{thread.summary}</p>{thread.provider === "pi" && thread.acceptanceCriteria?.length ? <div><label>Ticket progress</label><div className={styles.ticketProgress}><progress max={thread.acceptanceCriteria.length} value={thread.acceptanceCriteria.filter((item) => item.completed).length} aria-label={`${thread.title} progress`} /><strong>{thread.acceptanceCriteria.filter((item) => item.completed).length}/{thread.acceptanceCriteria.length}</strong></div><label>Acceptance criteria</label>{thread.acceptanceCriteria.map((item) => <p key={`${item.line}-${item.text}`}><span aria-hidden="true">{item.completed ? "☑" : "☐"}</span> {item.text}</p>)}</div> : null}</section><dl className={styles.details}><div><dt>Provider</dt><dd style={{ color: provider.color }}>{provider.label}</dd></div><div><dt>Parent thread</dt><dd>{thread.parentId ? <button className={styles.link} onClick={() => selectThread(thread.parentId)}>{threads[thread.parentId]?.key ?? "Unknown"}<ChevronRight size={13}/></button> : "Root task"}</dd></div><div><dt>Permission mode</dt><dd>{thread.permission}</dd></div><div><dt>Branch / worktree</dt><dd>{thread.branch ?? "No branch"}</dd></div>{thread.provider === "pi" && thread.piKind === "ticket" && <><div><dt>Ticket state</dt><dd>{thread.ticketState || statusLabel[thread.status]}</dd></div><div><dt>Assignee</dt><dd>{thread.assignee ?? "Unassigned"}</dd></div><div><dt>Blocked by</dt><dd>{thread.blockedBy?.length ? thread.blockedBy.join(", ") : "No dependencies"}</dd></div><div><dt>Issue</dt><dd>{thread.issue || "No ticket issues"}</dd></div></>}</dl></>}
       {tab === "subagents" && <section className={styles.listSection}><div className={styles.sectionHeading}><h3>Child threads</h3><button className={styles.primary} onClick={() => onAddSubagent?.(thread.id)}>Add subagent</button></div>{children.length ? children.map((child) => <button className={styles.child} key={child.id} onClick={() => selectThread(child.id)}><span className={`${styles.statusDot} ${styles[child.status]}`} /><span><strong>{child.title}</strong><small>{child.key} · {child.summary}</small></span><ChevronRight size={15}/></button>) : <p className={styles.empty}>No child threads yet. Add a bounded task to delegate through {provider.label}.</p>}</section>}
       {tab === "activity" && <section className={styles.timeline}>{activity.length ? activity.map((event) => <article key={event.id}><span className={`${styles.eventDot} ${styles[event.type]}`} /><div><strong>{event.title}</strong><p>{event.detail}</p><time>{formatTime(event.timestamp)}</time></div></article>) : <p className={styles.empty}>No activity recorded for this thread.</p>}</section>}
+      {tab === "terminal" && thread.parentId === undefined && thread.piKind !== "run" && <section className={styles.terminal} aria-label="Integrated terminal"><div className={styles.terminalCwd}>Working directory: <code>{folder.path}</code></div><div className={styles.terminalOutput} aria-live="polite">{terminalOutput || "Terminal ready."}</div><form className={styles.terminalForm} onSubmit={(event) => { event.preventDefault(); if (!window.constellationDesktop || terminalRunRef.current) return; setTerminalError(undefined); setTerminalOutput(""); void window.constellationDesktop.terminal.start({ cwd: folder.path, command: terminalCommand }).then((run) => { terminalRunRef.current = run; setTerminalRun(run); }).catch((error) => setTerminalError(error instanceof Error ? error.message : String(error))); }}><input value={terminalCommand} onChange={(event) => setTerminalCommand(event.target.value)} placeholder="Run a command…" aria-label="Terminal command" disabled={Boolean(terminalRun)} /><button className={styles.primary} type="submit" disabled={!terminalCommand.trim() || Boolean(terminalRun)}>Run</button>{terminalRun && <button type="button" onClick={() => void window.constellationDesktop?.terminal.cancel(terminalRun.runId)}>Cancel</button>}</form>{terminalError && <p className={styles.error} role="alert">{terminalError}</p>}</section>}
       {tab === "chat" && thread.piKind !== "run" && <section ref={chatOutputRef} className={styles.output}>{focusedPreview && <div className={styles.focusedPreview}><button onClick={() => setFocusedPreview(undefined)} aria-label="Close image preview"><X size={14}/></button><img src={focusedPreview.dataUrl} alt={focusedPreview.name}/><div><strong>{focusedPreview.name}</strong><small>{focusedPreview.path}</small><button onClick={() => void reveal(focusedPreview.path)}>Reveal in Finder</button></div></div>}<AgentChatTimeline timeline={timeline} liveness={liveness} provider={thread.provider ?? "codex"} loading={detailLoading} error={detailError} previews={previews} onPreview={handlePreview} onReveal={handleReveal} /></section>}
     </div>
     {tab === "chat" && thread.piKind !== "run" && thread.provider !== "pi" && <ThreadComposer thread={thread} cwd={folder.path} onSent={handleComposerSent} onCancelled={handleComposerCancelled} cancelRequest={cancelRequest} running={Boolean(live && timeline?.status === "running" && !timeline.externalRuntime)} onRepin={handleComposerRepin} />}
